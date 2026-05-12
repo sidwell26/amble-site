@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credits &amp; Attributions — Amble</title>
+  <meta name="description" content="Amble is built on the open-data and open-source community. Credits to the projects that make it possible.">
+  <meta name="theme-color" content="#5a7256">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body class="page-doc">
+  <div class="doc-container">
+    <header class="doc-header">
+      <a href="/" class="brand-link" aria-label="Amble home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="36" height="36">
+            <defs>
+              <linearGradient id="bmsky-attributions" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#7a9472"/>
+                <stop offset="100%" stop-color="#5a7256"/>
+              </linearGradient>
+              <radialGradient id="bmsun-attributions" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0%" stop-color="#fff5d0"/>
+                <stop offset="60%" stop-color="#f5e6a8"/>
+                <stop offset="100%" stop-color="#f5e6a8" stop-opacity="0"/>
+              </radialGradient>
+              <clipPath id="bmclip-attributions"><rect width="32" height="32" rx="7"/></clipPath>
+            </defs>
+            <g clip-path="url(#bmclip-attributions)">
+              <rect width="32" height="32" fill="url(#bmsky-attributions)"/>
+              <circle cx="22.9" cy="11.7" r="9.6" fill="url(#bmsun-attributions)"/>
+              <circle cx="22.9" cy="11.7" r="2.9" fill="#f5e6a8"/>
+              <path d="M 0 22.4 Q 10.7 17.1, 20.3 20.3 Q 26.7 22.4, 32 20.3 L 32 32 L 0 32 Z" fill="#3f5b40" opacity="0.6"/>
+              <path d="M 0 25.1 Q 8 20.3, 17.1 22.4 Q 25.6 24.5, 32 22.4 L 32 32 L 0 32 Z" fill="#2d4530" opacity="0.85"/>
+              <path d="M 3.2 21.9 Q 16 17.6, 28.8 21.9" fill="none" stroke="#f5f1e8" stroke-width="0.5" stroke-linecap="round" opacity="0.6"/>
+              <circle cx="9.6" cy="24" r="0.7" fill="#f5f1e8"/>
+              <circle cx="11.7" cy="23.6" r="0.4" fill="#f5f1e8" opacity="0.5"/>
+              <circle cx="13.9" cy="23.3" r="0.4" fill="#f5f1e8" opacity="0.4"/>
+              <circle cx="16" cy="22.9" r="0.4" fill="#f5f1e8" opacity="0.3"/>
+            </g>
+          </svg>
+        </span>
+      </a>
+      <div>
+        <div class="name">Amble</div>
+        <div class="subname">Credits &amp; Attributions</div>
+      </div>
+    </header>
+
+    <h1>Credits &amp; Attributions</h1>
+    <p class="meta">Amble is built on the work of the open-data and open-source community.</p>
+
+    <p>This page credits the projects that make Amble possible. Their licences require attribution; we're glad to give it.</p>
+
+    <h2>Map data</h2>
+    <p><strong>© OpenStreetMap contributors</strong>, available under the <a href="https://www.openstreetmap.org/copyright">Open Database License</a>.</p>
+    <p>OpenStreetMap is a free, editable map of the world maintained by hundreds of thousands of volunteers. Every walking path, park boundary, footbridge, and street lamp Amble routes through was mapped by someone, and we're grateful.</p>
+
+    <h2>Map tiles</h2>
+    <p>Map tile rendering by <a href="https://openfreemap.org"><strong>OpenFreeMap</strong></a>, a free, no-key map-tile service running an open style.</p>
+
+    <h2>Map renderer</h2>
+    <p>Native map rendering by <a href="https://maplibre.org"><strong>MapLibre</strong></a>, an open-source fork of Mapbox GL.</p>
+
+    <h2>Routing engines</h2>
+    <p>Amble's primary route generation runs entirely on-device using a custom algorithm. For fallback routing, Amble uses one of the following:</p>
+    <ul>
+      <li><a href="https://brouter.de"><strong>BRouter</strong></a> — the default fallback. Open-source, community-hosted, no API key required.</li>
+      <li><a href="https://openrouteservice.org"><strong>OpenRouteService</strong></a> — alternative routing provider when BRouter is unavailable.</li>
+      <li><a href="https://www.graphhopper.com"><strong>GraphHopper</strong></a> — alternative routing provider when configured.</li>
+    </ul>
+
+    <h2>Elevation data</h2>
+    <p>Elevation profiles use <a href="https://www.opentopodata.org"><strong>OpenTopoData</strong></a> serving the SRTM 30m global digital elevation model.</p>
+
+    <h2>Weather</h2>
+    <p>Weather glances by <a href="https://open-meteo.com"><strong>Open-Meteo</strong></a>, free open-source weather forecasting.</p>
+
+    <h2>Geocoding</h2>
+    <p>Place name search by <a href="https://nominatim.org"><strong>OpenStreetMap Nominatim</strong></a>.</p>
+
+    <h2>Software</h2>
+    <p>Amble is written in TypeScript using:</p>
+    <ul>
+      <li><a href="https://reactnative.dev"><strong>React Native</strong></a> — Apache 2.0</li>
+      <li><a href="https://expo.dev"><strong>Expo</strong></a> — MIT</li>
+      <li><a href="https://github.com/pmndrs/zustand"><strong>Zustand</strong></a> — MIT</li>
+      <li><a href="https://supabase.com"><strong>Supabase</strong></a> — Apache 2.0 (cloud sync, when signed in)</li>
+      <li>And many others, listed in the app's <code>package.json</code> and respecting their individual licences.</li>
+    </ul>
+
+    <h2>Sounds &amp; icons</h2>
+    <p>The Amble app icon and visual design are © Luke Sidwell, all rights reserved. The "soft hill at dusk" composition is original artwork.</p>
+    <p>Emoji used in-app are courtesy of the Unicode Consortium and rendered by Apple's system font.</p>
+
+    <h2>Found a missing credit?</h2>
+    <p>If we've used your work and missed crediting you, email <a href="mailto:legal@amble.fit">legal@amble.fit</a> and we'll add the credit immediately.</p>
+
+    <nav class="doc-footer">
+      <a href="/">Home</a>
+      <a href="walking-safely.html">Walking safely</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </nav>
+  </div>
+</body>
+</html>

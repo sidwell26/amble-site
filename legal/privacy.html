@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Amble</title>
+  <meta name="description" content="Amble's privacy policy. We collect almost nothing — no analytics, no tracking, no advertising. Walks live on your device.">
+  <meta name="theme-color" content="#5a7256">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body class="page-doc">
+  <div class="doc-container">
+    <header class="doc-header">
+      <a href="/" class="brand-link" aria-label="Amble home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="36" height="36">
+            <defs>
+              <linearGradient id="bmsky-privacy" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#7a9472"/>
+                <stop offset="100%" stop-color="#5a7256"/>
+              </linearGradient>
+              <radialGradient id="bmsun-privacy" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0%" stop-color="#fff5d0"/>
+                <stop offset="60%" stop-color="#f5e6a8"/>
+                <stop offset="100%" stop-color="#f5e6a8" stop-opacity="0"/>
+              </radialGradient>
+              <clipPath id="bmclip-privacy"><rect width="32" height="32" rx="7"/></clipPath>
+            </defs>
+            <g clip-path="url(#bmclip-privacy)">
+              <rect width="32" height="32" fill="url(#bmsky-privacy)"/>
+              <circle cx="22.9" cy="11.7" r="9.6" fill="url(#bmsun-privacy)"/>
+              <circle cx="22.9" cy="11.7" r="2.9" fill="#f5e6a8"/>
+              <path d="M 0 22.4 Q 10.7 17.1, 20.3 20.3 Q 26.7 22.4, 32 20.3 L 32 32 L 0 32 Z" fill="#3f5b40" opacity="0.6"/>
+              <path d="M 0 25.1 Q 8 20.3, 17.1 22.4 Q 25.6 24.5, 32 22.4 L 32 32 L 0 32 Z" fill="#2d4530" opacity="0.85"/>
+              <path d="M 3.2 21.9 Q 16 17.6, 28.8 21.9" fill="none" stroke="#f5f1e8" stroke-width="0.5" stroke-linecap="round" opacity="0.6"/>
+              <circle cx="9.6" cy="24" r="0.7" fill="#f5f1e8"/>
+              <circle cx="11.7" cy="23.6" r="0.4" fill="#f5f1e8" opacity="0.5"/>
+              <circle cx="13.9" cy="23.3" r="0.4" fill="#f5f1e8" opacity="0.4"/>
+              <circle cx="16" cy="22.9" r="0.4" fill="#f5f1e8" opacity="0.3"/>
+            </g>
+          </svg>
+        </span>
+      </a>
+      <div>
+        <div class="name">Amble</div>
+        <div class="subname">Privacy Policy</div>
+      </div>
+    </header>
+
+    <h1>Privacy Policy</h1>
+    <p class="meta">Last updated: 10 May 2026</p>
+
+    <p>This policy describes what Amble does with your data. It's written in plain language because that's how privacy policies should be written. If anything here is unclear, email <a href="mailto:privacy@amble.fit">privacy@amble.fit</a> and we'll fix it.</p>
+
+    <h2>The short version</h2>
+    <ul>
+      <li>Amble runs almost entirely on your device. Your walks live on your phone.</li>
+      <li>We don't have a tracking pixel, an analytics SDK, or an advertising network.</li>
+      <li>We don't sell, rent, or share your data. There is no business model that involves your data.</li>
+      <li>Some features need to send anonymous queries to public mapping services (described below). These services see a coordinate or a search term, but they don't know who you are.</li>
+      <li>If you sign in (optional, currently disabled), your saved walks back up to a cloud database we run. That's the only time your data leaves your device tied to your account.</li>
+    </ul>
+
+    <h2>What data Amble handles</h2>
+
+    <h3>On your device, never sent anywhere</h3>
+    <ul>
+      <li><strong>Your location</strong>, while the app is open or you're on an active walk</li>
+      <li><strong>The walks you've completed</strong> — distance, time, GPS trace, photos</li>
+      <li><strong>The walks you've saved</strong></li>
+      <li><strong>Your dog profiles</strong></li>
+      <li><strong>Your preferences</strong> — duration, terrain, dog mode, pocket mode, taste profile</li>
+      <li><strong>Your reminder time</strong>, if you set one</li>
+    </ul>
+    <p>This data is stored on your iPhone in the app's local storage. It does not leave your phone unless one of the following sections applies.</p>
+
+    <h3>Sent anonymously to public mapping services</h3>
+    <p>To plot you a route, we send small, anonymous queries to public OpenStreetMap-based services. These services do not know you are an Amble user.</p>
+
+    <table>
+      <thead>
+        <tr><th>Service</th><th>What we send</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Overpass API</strong> (overpass-api.de)</td>
+          <td>A bounding box around you (typically 1-2 km radius)</td>
+          <td>To download the walking-path data for your area</td>
+        </tr>
+        <tr>
+          <td><strong>OpenStreetMap Nominatim</strong></td>
+          <td>A search string (e.g. "Sheffield Cathedral") or coordinate</td>
+          <td>When you type into the via-point picker, or to name your start location</td>
+        </tr>
+        <tr>
+          <td><strong>OpenTopoData / SRTM</strong></td>
+          <td>A list of route coordinates</td>
+          <td>To compute the elevation profile of a generated walk</td>
+        </tr>
+        <tr>
+          <td><strong>open-meteo.com</strong></td>
+          <td>Your latitude and longitude</td>
+          <td>To show you the current weather glance</td>
+        </tr>
+        <tr>
+          <td><strong>BRouter / OpenRouteService / GraphHopper</strong></td>
+          <td>Route start and end coordinates</td>
+          <td>When the offline planner can't compute a route and we fall back to a hosted routing service</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>These services have their own privacy policies; see <em>Third-party services</em> below. None receive any identifier that links the request to you, your device, or your phone number.</p>
+
+    <h3>Sent to our cloud (only when signed in)</h3>
+    <p>Sign-in is currently disabled in Amble. When sign-in launches, signing in will:</p>
+    <ul>
+      <li>Create an account using your Apple ID (we receive: a user ID, optionally your name and email if you choose to share them)</li>
+      <li>Back up your saved walks to a database we run on Supabase, so you can restore them on a new phone</li>
+      <li>Optionally back up walk photos to our cloud storage</li>
+    </ul>
+    <p>The cloud copy is encrypted in transit (HTTPS) and at rest (Supabase encrypts its disks). You can delete your account at any time from the Profile tab; deleting wipes everything we hold within 30 days.</p>
+
+    <h3>Apple Health (not available in this version)</h3>
+    <p>Apple Health integration is not enabled in v1.0. No health data is read or written. When enabled in a future version, Amble will:</p>
+    <ul>
+      <li>Read your past walking workouts to populate your Amble history</li>
+      <li>Write each finished Amble walk back to Health as an <code>HKWorkout</code> so it counts toward your activity rings</li>
+    </ul>
+    <p>This data flows directly between Amble and the iOS Health system. It is not transmitted to our servers.</p>
+
+    <h2>Permissions Amble asks for</h2>
+    <table>
+      <thead><tr><th>Permission</th><th>Why</th><th>If you decline</th></tr></thead>
+      <tbody>
+        <tr><td>Location (When in use)</td><td>To plan a route from where you are, and track your walk</td><td>Use Plan-a-Walk mode by typing a start address</td></tr>
+        <tr><td>Location (Always)</td><td>To keep tracking your walk when the screen is off</td><td>Walk tracking pauses when you lock the phone</td></tr>
+        <tr><td>Notifications</td><td>To send a daily walk reminder if you set one</td><td>No reminders sent</td></tr>
+        <tr><td>Camera &amp; Photos</td><td>To attach photos to walks</td><td>Photo feature unavailable</td></tr>
+        <tr><td>Apple Health</td><td>To import past walks and save new ones</td><td>Health integration unavailable</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Cookies, analytics, advertising</h2>
+    <p>Amble does not use any of these. There is no tracking SDK in the app. We don't measure how often you open the app, which features you use, or how long your sessions last. We do not show ads.</p>
+
+    <h2>Children's privacy</h2>
+    <p>Amble is intended for users aged 4 and over. We don't knowingly collect personal information from anyone, of any age, beyond what's described above.</p>
+
+    <h2>Your rights</h2>
+    <p>You can:</p>
+    <ul>
+      <li>View, export, and delete every walk Amble has saved, from inside the app</li>
+      <li>Delete your cloud backup (when sign-in is enabled) by signing out and tapping "Delete account"</li>
+      <li>Email us at <a href="mailto:privacy@amble.fit">privacy@amble.fit</a> for any data-related request</li>
+    </ul>
+    <p>If you're in the EU/UK, GDPR gives you the right to data access, correction, deletion, portability, and to object to processing. To exercise any of these, email us; we'll respond within 30 days.</p>
+
+    <h2>Third-party services</h2>
+    <p>Amble uses these external services. Each has its own privacy policy; the terms apply when your device communicates with them.</p>
+    <ul>
+      <li><a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy">OpenStreetMap</a> — map data</li>
+      <li><a href="https://overpass-api.de">Overpass API</a> — OSM querying</li>
+      <li><a href="https://openfreemap.org">OpenFreeMap</a> — map tiles</li>
+      <li><a href="https://maplibre.org">MapLibre</a> — rendering library (no network calls of its own)</li>
+      <li><a href="https://open-meteo.com/en/terms">open-meteo.com</a> — weather</li>
+      <li><a href="https://www.opentopodata.org/">OpenTopoData</a> — elevation</li>
+      <li><a href="https://brouter.de">BRouter</a> — routing fallback</li>
+      <li><a href="https://openrouteservice.org/services/">OpenRouteService</a> — routing fallback</li>
+      <li><a href="https://www.graphhopper.com/privacy/">GraphHopper</a> — routing fallback</li>
+      <li><a href="https://supabase.com/privacy">Supabase</a> — cloud backup (only when signed in)</li>
+      <li><a href="https://www.apple.com/legal/privacy/data/en/health-app/">Apple HealthKit</a> — when you grant permission</li>
+    </ul>
+
+    <h2>Changes to this policy</h2>
+    <p>If we change this policy, we'll update the "Last updated" date at the top and, if the change is material, show you a notice in the app the next time you open it.</p>
+
+    <h2>Contact</h2>
+    <ul>
+      <li><strong>Email</strong>: <a href="mailto:privacy@amble.fit">privacy@amble.fit</a></li>
+      <li><strong>Developer</strong>: S Sidwell, United Kingdom</li>
+    </ul>
+
+    <nav class="doc-footer">
+      <a href="/">Home</a>
+      <a href="walking-safely.html">Walking safely</a>
+      <a href="terms.html">Terms</a>
+      <a href="attributions.html">Attributions</a>
+    </nav>
+  </div>
+</body>
+</html>
