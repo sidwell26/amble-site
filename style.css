@@ -608,6 +608,30 @@ img, svg { display: block; max-width: 100%; }
   border-top: 1px solid var(--border);
   margin: 36px 0;
 }
+/* Pro feature list on pricing.html — each feature is a dt/dd pair so the
+   title reads as a label and the explanation sits clearly underneath. */
+.page-doc .pro-features {
+  margin: 24px 0 32px;
+  padding: 0;
+}
+.page-doc .pro-features dt {
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--ink);
+  margin-top: 22px;
+  margin-bottom: 4px;
+}
+.page-doc .pro-features dt:first-child { margin-top: 0; }
+.page-doc .pro-features dd {
+  margin: 0 0 0 0;
+  padding-left: 0;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+.page-doc .pro-features dd em {
+  color: var(--ink);
+  font-style: italic;
+}
 .doc-footer {
   margin-top: 48px;
   padding-top: 20px;
