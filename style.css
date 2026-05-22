@@ -442,6 +442,35 @@ img, svg { display: block; max-width: 100%; }
   color: var(--ink-on-dark-faint);
   margin: 0;
 }
+.cta-fineprint a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* "Coming soon" pill — same shape as a button, but visually inert
+   so it reads as a status rather than a CTA. */
+.cta-soon {
+  background: transparent;
+  color: var(--ink-faint);
+  border: 1px dashed var(--ink-faint);
+  cursor: default;
+  font-weight: 500;
+}
+.cta-soon:hover { transform: none; box-shadow: none; }
+.cta-soon-on-dark {
+  color: var(--ink-on-dark-faint);
+  border-color: var(--ink-on-dark-faint);
+}
+
+.cta-band-buttons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.cta-band-buttons .cta-light { margin-bottom: 0; }
 
 @media (max-width: 600px) {
   .cta-band { padding: 64px 20px; }
