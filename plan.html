@@ -1541,6 +1541,34 @@ function renderSummary() {
   }
 }
 
+// Draw the final completed trip on the map — each day's picked route in its own colour,
+// with all sleep markers still visible. Fits the map to show the whole trip.
+function renderFinalMap() {
+  if (!trip.days || !trip.days.length) { renderOnMap(); return; }
+  // Clear day alt layers (direct/paths/scenic overlays)
+  for (const flavour of ['direct','paths','scenic']) {
+    const src = map.getSource(`dayalt-${flavour}`);
+    if (src) src.setData(emptyGJ());
+  }
+  // Draw each day's route in its day colour using the seg0…segN sources
+  for (let i = 0; i < 14; i++) {
+    const src = map.getSource(`seg${i}`);
+    if (!src) continue;
+    const day = trip.days[i];
+    if (day && day.route && day.route.coordinates && day.route.coordinates.length >= 2) {
+      src.setData({
+        type: 'Feature', properties: {},
+        geometry: { type: 'LineString', coordinates: day.route.coordinates.map(c => [c.longitude, c.latitude]) },
+      });
+    } else {
+      src.setData(emptyGJ());
+    }
+  }
+  // Fit map to entire trip
+  const allCoords = trip.days.flatMap(d => d.route?.coordinates || []);
+  if (allCoords.length) fitMap(allCoords);
+}
+
 async function syncToPhone() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { toast('Not signed in', 'red'); return; }
@@ -2002,7 +2030,7 @@ function goToStep(n) {
     s.className = 'step' + (i < nIdx ? ' done' : i === nIdx ? ' active' : '');
   });
 
-  if (n === 4) renderSummary();
+  if (n === 4) { renderSummary(); renderFinalMap(); }
 }
 
 function confirmSkeleton() {
@@ -2100,8 +2128,29 @@ function renderSleepStep() {
     fetchAccomPois(coord, ACCOM_SEARCH_RADIUS).then(pois => {
       sleepPois[i] = pois;
       renderSleepNight(i, coord);
+      placeAllAccomMarkers(i);
     });
   }
+}
+
+// Place faint preview markers for every accommodation option for night i
+function placeAllAccomMarkers(i) {
+  // Remove old previews for this night
+  (accomAllMarkers[i] || []).forEach(m => m.remove());
+  accomAllMarkers[i] = [];
+  const pois = sleepPois[i] || [];
+  const pick = sleepPicks[i];
+  pois.forEach(p => {
+    const isPicked = pick && pick !== 'skip' && pick.id === p.id;
+    if (isPicked) return; // picked one is handled by sleepMarkers[i]
+    const el = document.createElement('div');
+    el.style.cssText = 'font-size:18px;cursor:pointer;opacity:0.65;line-height:1;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.4))';
+    el.textContent = p.emoji || '🏨';
+    el.title = p.name;
+    const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+      .setLngLat([p.coord.longitude, p.coord.latitude]).addTo(map);
+    accomAllMarkers[i].push(m);
+  });
 }
 
 function renderSleepNight(i, coord) {
@@ -2142,8 +2191,9 @@ function pickSleepByIdx(dayIdx, poiIdx) {
   if (poi) pickSleep(dayIdx, poi);
 }
 
-// Sleep markers live here (emoji pins separate from numbered day-end pins)
-const sleepMarkers = {}; // dayIdx → MapLibre Marker
+// Sleep markers: selected pick (emoji pin per night) + all-options preview pins
+const sleepMarkers = {};    // dayIdx → MapLibre Marker (the picked one, large)
+const accomAllMarkers = {}; // dayIdx → [MapLibre Marker] (faint pins for every option)
 
 function pickSleep(dayIdx, poi) {
   // Remove any existing sleep marker for this night
@@ -2173,14 +2223,16 @@ function pickSleep(dayIdx, poi) {
     if (dayEndMarkers[dayIdx]) {
       dayEndMarkers[dayIdx].setLngLat([poi.coord.longitude, poi.coord.latitude]);
     }
-    // Place an emoji accommodation marker on the map
+    // Place a large emoji marker for the selected accommodation
     const el = document.createElement('div');
-    el.style.cssText = 'font-size:24px;cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));line-height:1';
+    el.style.cssText = 'font-size:28px;cursor:pointer;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.6));line-height:1';
     el.textContent = poi.emoji || '🏨';
     el.title = poi.name;
     const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([poi.coord.longitude, poi.coord.latitude]).addTo(map);
     sleepMarkers[dayIdx] = m;
+    // Refresh preview markers for this night (removes the now-picked one from faint set)
+    placeAllAccomMarkers(dayIdx);
     // Pan map to show it
     map.panTo([poi.coord.longitude, poi.coord.latitude], { duration: 600 });
   }
@@ -2211,6 +2263,9 @@ function startDayPicker() {
   currentDayIdx = 0;
   dayRoutes = new Array(trip.targetDayCount).fill(null);
   dayAlts   = new Array(trip.targetDayCount).fill(null);
+  // Clear accommodation preview markers — no longer needed once we enter day picker
+  Object.values(accomAllMarkers).forEach(arr => arr.forEach(m => m.remove()));
+  Object.keys(accomAllMarkers).forEach(k => delete accomAllMarkers[k]);
   goToStep(3);
   renderDayPicker(0);
 }
@@ -2413,7 +2468,7 @@ function renderDayPickerBody(alts, dayIdx) {
           padding:4px 6px;margin-bottom:3px;background:rgba(255,255,255,0.05);
           border-radius:6px;font-size:11px;color:var(--text)">
         <span>${icon} ${label}</span>
-        <button onclick="removeCustomWaypoint(customWaypoints[${i}].coord)"
+        <button onclick="removeCustomWaypointByIdx(${i})"
           style="background:none;border:none;color:var(--text3);font-size:13px;
             cursor:pointer;padding:0 4px;line-height:1" title="Remove">✕</button>
       </div>`;
@@ -2903,6 +2958,8 @@ async function addPoiAsVia(poi) {
 function clearCustomWaypoints() {
   customWaypoints.forEach(w => { if (w.marker) w.marker.remove(); });
   customWaypoints = [];
+  replanPending = false;
+  replanQueued = false;
 }
 
 function toggleWaypointMode() {
@@ -2945,18 +3002,28 @@ async function onMapTapWaypoint(lat, lng) {
 
 async function removeCustomWaypoint(coord) {
   const idx = customWaypoints.findIndex(w => w.coord === coord);
-  if (idx === -1) return;
+  await removeCustomWaypointByIdx(idx);
+}
+
+async function removeCustomWaypointByIdx(idx) {
+  if (idx < 0 || idx >= customWaypoints.length) return;
   customWaypoints[idx].marker?.remove();
   customWaypoints.splice(idx, 1);
-  // Renumber remaining pins
-  customWaypoints.forEach((w, i) => { if (w.marker?._element) w.marker._element.textContent = `W${i+1}`; });
+  // Renumber remaining non-POI pins on the map
+  customWaypoints.forEach((w, i) => {
+    if (!w.isPoi && w.marker?._element) w.marker._element.textContent = `W${i+1}`;
+  });
   if (currentDayAlts) renderDayPickerBody(currentDayAlts, currentDayIdx);
   await replanWithVias();
 }
 
+let replanQueued = false; // track if another replan was requested while one was in flight
+
 async function replanWithVias() {
-  if (!currentDayAlts || replanPending) return;
+  if (!currentDayAlts) return;
+  if (replanPending) { replanQueued = true; return; } // queue the request
   replanPending = true;
+  replanQueued = false;
   const hint = document.getElementById('pick-hint');
   if (hint) { hint.textContent = '↺ Replanning…'; hint.style.display = 'block'; }
 
@@ -2976,6 +3043,8 @@ async function replanWithVias() {
 
   if (hint) hint.style.display = 'none';
   replanPending = false;
+  // If another change happened while we were routing, run again now
+  if (replanQueued) replanWithVias();
 }
 
 // ── Pick day and compile ──────────────────────────────────────────────────────
@@ -3081,7 +3150,7 @@ async function pickDay(dayIdx) {
     trip.stage = 'complete';
     trip.updatedAt = new Date().toISOString();
     clearDayPickerMapLayers();
-    renderOnMap();
+    renderFinalMap();
     goToStep(4);
   } else {
     currentDayIdx = dayIdx + 1;
@@ -3359,6 +3428,8 @@ function newTrip() {
   sleepPicks = {}; sleepPois = {};
   Object.values(sleepMarkers).forEach(m => m.remove());
   Object.keys(sleepMarkers).forEach(k => delete sleepMarkers[k]);
+  Object.values(accomAllMarkers).forEach(arr => arr.forEach(m => m.remove()));
+  Object.keys(accomAllMarkers).forEach(k => delete accomAllMarkers[k]);
   dayRoutes = []; dayAlts = [];
   currentDayIdx = 0; pickedFlavour = null;
   resetElevProfile();
