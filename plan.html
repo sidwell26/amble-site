@@ -168,15 +168,14 @@
       width: 20px; height: 20px; border-radius: 50%; cursor: grab;
       border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5);
     }
-    /* Candidate cards */
+    /* Candidate cards — grid so all fit without scrolling */
     .candidates-scroll {
-      display: flex; gap: 10px; overflow-x: auto; padding: 12px 16px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px; padding: 12px 16px;
       background: var(--surface); border-bottom: 1px solid var(--border);
-      scrollbar-width: none;
     }
-    .candidates-scroll::-webkit-scrollbar { display: none; }
     .candidate-pill {
-      flex-shrink: 0; min-width: 160px; padding: 10px 14px;
+      padding: 10px 12px;
       background: var(--surface2); border: 1.5px solid var(--border); border-radius: 10px;
       cursor: pointer; transition: border-color 0.15s, background 0.15s;
     }
@@ -2232,17 +2231,44 @@ function getB() {
 }
 
 function getDayBounds(dayIdx) {
-  const b = getB();
+  // For the START: day 0 starts at the trip start coord; subsequent days start
+  // at the previous day's end (which may be a pinned accommodation coord).
+  // For the END: read from dayEnds[dayIdx] directly — if it's a pinned accom
+  // (set by pickSleep), use poi.coord so the route actually ends AT the hotel/campsite.
+  // Using boundaries() + skeleton coords ignores pinned ends, causing the day
+  // route to end at the nearest polyline point instead of the accom.
   const coords = trip.skeleton.coordinates;
-  const start = coords[b[dayIdx]];
-  const end   = coords[b[dayIdx + 1]];
+  const b = getB();
+
+  // Start: if previous day has a pinned end, use that pinned coord
+  let start;
+  if (dayIdx === 0) {
+    start = coords[b[0]]; // trip start
+  } else {
+    const prevEnd = trip.skeleton.dayEnds[dayIdx - 1];
+    start = prevEnd.kind === 'pinned' ? prevEnd.coord : coords[b[dayIdx]];
+  }
+
+  // End: if this day has a pinned end (accom pick), route TO the accom coord
+  let end;
+  const isLastDay = dayIdx === trip.targetDayCount - 1;
+  if (isLastDay) {
+    end = coords[coords.length - 1]; // trip finish
+  } else {
+    const dayEnd = trip.skeleton.dayEnds[dayIdx];
+    end = dayEnd.kind === 'pinned' ? dayEnd.coord : coords[b[dayIdx + 1]];
+  }
+
   return { start, end };
 }
 
 async function renderDayPicker(dayIdx) {
   currentDayIdx = dayIdx;
+  currentDayAlts = null;  // clear immediately so stale alts from prev day can't leak
+  pickedFlavour = null;   // reset flavour for new day
   clearCustomWaypoints();
   waypointMode = false;
+  hidePoiPopup();
   clearDayPickerMapLayers();
   clearPoiMarkers();
   resetElevProfile();
@@ -2259,16 +2285,16 @@ async function renderDayPicker(dayIdx) {
 
   const { start, end } = getDayBounds(dayIdx);
 
-  // Generate 3 alternatives
+  // Generate 3 alternatives for this specific day's start→end bounds
   try {
     const alts = await generateDayAlts(start, end, dayIdx);
+    // Guard: if user navigated away while we were generating, discard
+    if (currentDayIdx !== dayIdx) return;
     dayAlts[dayIdx] = alts;
     currentDayAlts = alts;
 
-    // Default pick = previously picked or first available
-    if (!pickedFlavour || !alts[pickedFlavour]) {
-      pickedFlavour = alts.direct ? 'direct' : alts.paths ? 'paths' : 'scenic';
-    }
+    // Default pick = direct if available, else first available
+    pickedFlavour = alts.direct ? 'direct' : alts.paths ? 'paths' : 'scenic';
 
     // Show the picked alt on map
     showDayAltOnMap(alts, pickedFlavour, dayIdx);
@@ -2353,22 +2379,23 @@ function renderDayPickerBody(alts, dayIdx) {
     <div class="elev-coord" id="ep-coord"></div>
   </div>`;
 
-  // POI chips row
+  // POI chips row — badge counts read from live poiData so they show correctly
+  // even if renderDayPickerBody is called after fetchDayPois has already resolved.
   html += `<div class="poi-chip-row" id="poi-chips">
     <div class="poi-chip${poiVisible.water ? ' on' : ''}" id="chip-water"
         style="${poiVisible.water ? 'background:#3b82f6;border-color:#3b82f6' : ''}"
         onclick="togglePoi('water')">
-      💧 <span>Water</span><span class="poi-chip-badge" id="badge-water">0</span>
+      💧 <span>Water</span><span class="poi-chip-badge" id="badge-water">${poiData.water.length || '…'}</span>
     </div>
     <div class="poi-chip${poiVisible.shop ? ' on' : ''}" id="chip-shop"
         style="${poiVisible.shop ? 'background:#f59e0b;border-color:#f59e0b' : ''}"
         onclick="togglePoi('shop')">
-      🛒 <span>Shop</span><span class="poi-chip-badge" id="badge-shop">0</span>
+      🛒 <span>Shop</span><span class="poi-chip-badge" id="badge-shop">${poiData.shop.length || '…'}</span>
     </div>
     <div class="poi-chip${poiVisible.landmark ? ' on' : ''}" id="chip-landmark"
         style="${poiVisible.landmark ? 'background:#a855f7;border-color:#a855f7' : ''}"
         onclick="togglePoi('landmark')">
-      📍 <span>Points</span><span class="poi-chip-badge" id="badge-landmark">0</span>
+      🏛 <span>Sights</span><span class="poi-chip-badge" id="badge-landmark">${poiData.landmark.length || '…'}</span>
     </div>
   </div>`;
 
@@ -2688,8 +2715,13 @@ const OVERPASS_POI_TAGS = {
   landmark: [
     'node["natural"="peak"]',
     'node["tourism"="viewpoint"]',
+    'node["tourism"="attraction"]',
+    'node["tourism"="museum"]',
     'node["historic"="monument"]',
     'node["historic"="ruins"]',
+    'node["historic"="castle"]',
+    'node["historic"="archaeological_site"]',
+    'node["amenity"="place_of_worship"]',
   ],
 };
 
@@ -2705,14 +2737,15 @@ async function fetchDayPois(alts, dayIdx) {
     if (c.longitude < minLon) minLon = c.longitude;
     if (c.longitude > maxLon) maxLon = c.longitude;
   }
-  // 500m padding so POIs near the route edges show up
-  const pad = 0.005;
+  // 1 km padding so POIs near the route edges show up
+  const pad = 0.009;
   const bbox = `${minLat-pad},${minLon-pad},${maxLat+pad},${maxLon+pad}`;
 
-  // Fire one query per kind in parallel
+  // Fire one query per kind in parallel — increase limit to 100 for landmarks
   await Promise.allSettled(['water','shop','landmark'].map(async kind => {
     const tagFilters = OVERPASS_POI_TAGS[kind].map(t => `${t}(${bbox});`).join('\n  ');
-    const q = `[out:json][timeout:15];\n(\n  ${tagFilters}\n);\nout center 50;`;
+    const limit = kind === 'landmark' ? 100 : 50;
+    const q = `[out:json][timeout:20];\n(\n  ${tagFilters}\n);\nout center ${limit};`;
     const data = await overpassQuery(q);
     if (!data) return;
     const pois = (data.elements || []).map(e => {
@@ -2729,9 +2762,25 @@ async function fetchDayPois(alts, dayIdx) {
     // Only update UI if still on the same day
     if (currentDayIdx !== dayIdx) return;
     const badge = document.getElementById(`badge-${kind}`);
-    if (badge) badge.textContent = pois.length > 0 ? String(pois.length) : '0';
+    if (badge) badge.textContent = String(pois.length);
     // If user already toggled this chip on, render the markers now
     if (poiVisible[kind]) showPoiMarkers(kind);
+    // Auto-show markers on first load so the user can SEE all POIs without
+    // having to explicitly toggle each chip. Chips still work as toggles.
+    if (!poiVisible[kind] && pois.length > 0) {
+      // Don't force-enable on re-renders; only on initial data arrival
+      // (poiVisible starts false on each renderDayPicker call)
+      poiVisible[kind] = true;
+      const chip = document.getElementById(`chip-${kind}`);
+      if (chip) {
+        chip.classList.add('on');
+        const color = POI_COLORS[kind];
+        chip.style.background = color;
+        chip.style.borderColor = color;
+        chip.style.color = '#fff';
+      }
+      showPoiMarkers(kind);
+    }
   }));
 }
 
@@ -2749,7 +2798,7 @@ function showPoiMarkers(kind) {
     el.style.cssText = `width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #fff;
       display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;
       box-shadow:0 2px 6px rgba(0,0,0,0.4)`;
-    el.textContent = kind === 'water' ? '💧' : kind === 'shop' ? '🛒' : '📍';
+    el.textContent = kind === 'water' ? '💧' : kind === 'shop' ? '🛒' : '🏛';
     el.title = poi.name;
     // Tap → show popup with name + "Add to route" button.
     // Long-press (right-click on desktop) → add directly as via without popup.
@@ -2931,9 +2980,8 @@ async function replanWithVias() {
 
 // ── Pick day and compile ──────────────────────────────────────────────────────
 function buildRouteObj(dayIdx, alt) {
-  const b = getB();
-  const start = trip.skeleton.coordinates[b[dayIdx]];
-  const end   = trip.skeleton.coordinates[b[dayIdx + 1]];
+  // Use getDayBounds so pinned accom ends are respected (same as route generation)
+  const { start, end } = getDayBounds(dayIdx);
   const sleep = sleepPicks[dayIdx];
   const accommodation = (sleep && sleep !== 'skip')
     ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
@@ -2958,10 +3006,8 @@ function buildRouteObj(dayIdx, alt) {
 }
 
 function buildTripDay(dayIdx, routeObj) {
-  const b = getB();
-  const coords = trip.skeleton.coordinates;
-  const start = coords[b[dayIdx]];
-  const end   = coords[b[dayIdx + 1]];
+  // Use getDayBounds so pinned accom ends are respected
+  const { start, end } = getDayBounds(dayIdx);
   const sleep = sleepPicks[dayIdx];
   const accommodation = (sleep && sleep !== 'skip')
     ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
