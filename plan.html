@@ -7,787 +7,753 @@
   <meta name="description" content="Plan your multi-day walking trip on the web. Syncs instantly to the Amble app on your phone.">
   <meta name="theme-color" content="#0a0a0a">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-
-  <!-- MapLibre GL JS -->
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-
-  <!-- Supabase JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-
   <style>
-    /* ── Reset + base ─────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-
-    /* ── Theme (matches app dark theme) ──────────────────────────── */
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #f5f5f5; }
     :root {
-      --bg:           #0a0a0a;
-      --surface:      #141414;
-      --surface2:     #1e1e1e;
-      --border:       #2a2a2a;
-      --accent:       #a3e635;
-      --accent-dim:   #4d6e19;
-      --text:         #f5f5f5;
-      --text2:        #a3a3a3;
-      --text3:        #525252;
-      --red:          #ef4444;
-      --blue:         #3b82f6;
-      --amber:        #f59e0b;
-      --purple:       #a855f7;
-      --pink:         #ec4899;
-      --teal:         #14b8a6;
+      --bg: #0a0a0a; --surface: #141414; --surface2: #1e1e1e; --border: #2a2a2a;
+      --accent: #a3e635; --text: #f5f5f5; --text2: #a3a3a3; --text3: #525252;
+      --red: #ef4444;
     }
-
-    body { background: var(--bg); color: var(--text); }
-
-    /* ── Layout ───────────────────────────────────────────────────── */
     .app { display: flex; flex-direction: column; height: 100vh; }
-
     .topbar {
-      display: flex; align-items: center; gap: 12px;
-      padding: 0 16px; height: 52px;
-      background: var(--surface); border-bottom: 1px solid var(--border);
-      flex-shrink: 0; z-index: 10;
+      display: flex; align-items: center; gap: 12px; padding: 0 16px; height: 52px;
+      background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 10;
     }
     .topbar-brand { font-weight: 800; font-size: 18px; color: var(--accent); text-decoration: none; }
     .topbar-title { font-size: 14px; font-weight: 600; color: var(--text2); flex: 1; }
     .topbar-auth { display: flex; align-items: center; gap: 8px; }
-
     .main { display: flex; flex: 1; overflow: hidden; }
-
-    /* ── Sidebar ──────────────────────────────────────────────────── */
     .sidebar {
-      width: 340px; flex-shrink: 0;
-      background: var(--surface); border-right: 1px solid var(--border);
-      display: flex; flex-direction: column; overflow-y: auto;
+      width: 360px; flex-shrink: 0; background: var(--surface);
+      border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto;
     }
     .sidebar-section { padding: 16px; border-bottom: 1px solid var(--border); }
-    .sidebar-section:last-child { border-bottom: none; }
-    .section-title {
-      font-size: 11px; font-weight: 700; color: var(--text3);
-      letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 12px;
-    }
-
-    /* ── Map ──────────────────────────────────────────────────────── */
+    .section-title { font-size: 11px; font-weight: 700; color: var(--text3); letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 12px; }
     #map { flex: 1; }
-    .maplibregl-canvas { outline: none; }
-
-    /* ── Auth panel ───────────────────────────────────────────────── */
+    /* Auth */
     #auth-panel {
-      position: absolute; inset: 0;
-      background: rgba(10,10,10,0.92);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 100;
+      position: fixed; inset: 0; background: rgba(10,10,10,0.95);
+      display: flex; align-items: center; justify-content: center; z-index: 200;
     }
     .auth-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 32px; width: 360px; max-width: 90vw;
-      display: flex; flex-direction: column; gap: 16px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 32px; width: 360px; max-width: 90vw; display: flex; flex-direction: column; gap: 14px;
     }
     .auth-logo { font-size: 32px; font-weight: 900; color: var(--accent); text-align: center; }
     .auth-sub { font-size: 14px; color: var(--text2); text-align: center; line-height: 1.5; }
     .auth-err { font-size: 13px; color: var(--red); text-align: center; min-height: 18px; }
-
-    /* ── Form controls ────────────────────────────────────────────── */
+    /* Controls */
     label { font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 4px; }
-    input[type=text], input[type=email], input[type=password], input[type=number], select {
-      width: 100%; padding: 10px 12px;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 8px; color: var(--text); font-size: 14px;
-      outline: none;
+    input[type=text], input[type=number] {
+      width: 100%; padding: 10px 12px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; outline: none;
     }
-    input:focus, select:focus { border-color: var(--accent); }
-    input[type=range] { width: 100%; accent-color: var(--accent); }
-
+    input:focus { border-color: var(--accent); }
     .btn {
-      padding: 12px 20px; border-radius: 8px; font-size: 14px;
-      font-weight: 700; border: none; cursor: pointer; transition: opacity 0.15s;
+      padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 700;
+      border: none; cursor: pointer; transition: opacity 0.15s; text-align: center;
     }
     .btn:hover { opacity: 0.85; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-accent { background: var(--accent); color: #0a0a0a; width: 100%; }
-    .btn-outline {
-      background: transparent; color: var(--text2);
-      border: 1px solid var(--border); width: 100%;
-    }
-    .btn-small { padding: 8px 14px; font-size: 13px; }
-    .btn-red { background: var(--red); color: #fff; }
-
-    /* ── Step indicator ───────────────────────────────────────────── */
-    .steps { display: flex; gap: 4px; padding: 0 16px 12px; margin-top: 4px; }
-    .step {
-      flex: 1; height: 3px; border-radius: 2px;
-      background: var(--border); transition: background 0.2s;
-    }
+    .btn-accent { background: var(--accent); color: #0a0a0a; width: 100%; display: block; }
+    .btn-outline { background: transparent; color: var(--text2); border: 1px solid var(--border); width: 100%; display: block; }
+    .btn-sm { padding: 8px 14px; font-size: 13px; }
+    /* Steps */
+    .steps { display: flex; gap: 4px; padding: 12px 16px 0; }
+    .step { flex: 1; height: 3px; border-radius: 2px; background: var(--border); transition: background 0.2s; }
     .step.done { background: var(--accent); }
-    .step.active { background: var(--accent); opacity: 0.5; }
-
-    /* ── Trip name ────────────────────────────────────────────────── */
-    .trip-name-row { display: flex; gap: 8px; align-items: flex-end; }
-    .trip-name-row input { flex: 1; }
-
-    /* ── Endpoint rows ────────────────────────────────────────────── */
-    .endpoint-row {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 12px; background: var(--surface2);
-      border-radius: 8px; border: 1px solid var(--border);
-      margin-bottom: 8px; cursor: pointer;
-      transition: border-color 0.15s;
+    .step.active { background: var(--accent); opacity: 0.6; }
+    /* Place search */
+    .place-wrap { position: relative; margin-bottom: 8px; }
+    .place-wrap input { padding-right: 36px; }
+    .place-clear {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--text3); font-size: 16px;
+      cursor: pointer; padding: 0; line-height: 1; display: none;
     }
-    .endpoint-row:hover, .endpoint-row.picking { border-color: var(--accent); }
-    .endpoint-dot {
-      width: 28px; height: 28px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 900; flex-shrink: 0;
+    .place-results {
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      max-height: 200px; overflow-y: auto; z-index: 50; display: none;
     }
-    .dot-start { background: var(--accent); color: #0a0a0a; }
-    .dot-end   { background: var(--red); color: #fff; }
-    .endpoint-label { flex: 1; font-size: 13px; color: var(--text2); }
-    .endpoint-label.set { color: var(--text); }
-    .endpoint-coords { font-size: 11px; color: var(--text3); }
-
-    /* ── Day count + km/day ───────────────────────────────────────── */
-    .stat-row { display: flex; gap: 8px; }
+    .place-result {
+      padding: 10px 12px; font-size: 13px; color: var(--text); cursor: pointer;
+      border-bottom: 1px solid var(--border);
+    }
+    .place-result:last-child { border-bottom: none; }
+    .place-result:hover { background: var(--surface); color: var(--accent); }
+    .place-result-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+    .place-set {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .place-dot { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 900; flex-shrink: 0; }
+    .dot-s { background: var(--accent); color: #0a0a0a; }
+    .dot-f { background: var(--red); color: #fff; }
+    .place-set-name { flex: 1; font-size: 13px; font-weight: 600; }
+    .place-set-change { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; }
+    /* Stat boxes */
+    .stat-row { display: flex; gap: 8px; margin-bottom: 12px; }
     .stat-box { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
-    .stat-box label { margin-bottom: 6px; }
-    .stat-value { font-size: 22px; font-weight: 800; color: var(--text); }
+    .stat-box label { margin-bottom: 4px; }
+    .stat-box input { padding: 4px 8px; font-size: 20px; font-weight: 800; }
     .stat-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
-
-    /* ── Day-end list ─────────────────────────────────────────────── */
+    /* Loop toggle */
+    .loop-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; cursor: pointer; }
+    .loop-row input { width: auto; cursor: pointer; accent-color: var(--accent); }
+    .loop-row span { font-size: 13px; color: var(--text2); }
+    /* Day list */
     .day-row {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 12px; background: var(--surface2);
-      border-radius: 8px; border: 1px solid var(--border);
-      margin-bottom: 6px;
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
     }
     .day-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
     .day-label { flex: 1; font-size: 13px; font-weight: 600; }
-    .day-km { font-size: 13px; color: var(--text2); }
-    .day-stop {
-      font-size: 11px; color: var(--text3); margin-top: 2px;
-      padding-left: 22px;
-    }
-
-    /* ── Pre-booked stops ─────────────────────────────────────────── */
+    .day-km { font-size: 13px; color: var(--text2); font-weight: 700; }
+    .day-stop { font-size: 11px; color: var(--text3); margin-top: 2px; }
+    /* Stops */
     .stop-row {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 10px; background: var(--surface2);
-      border-radius: 8px; border: 1px solid var(--border);
-      margin-bottom: 6px;
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px;
     }
-    .stop-row span { flex: 1; font-size: 13px; }
-    .stop-day { font-size: 11px; color: var(--text3); }
-
-    /* ── Toast ────────────────────────────────────────────────────── */
+    .stop-row-name { flex: 1; font-size: 13px; }
+    .stop-row-day { font-size: 11px; color: var(--text3); }
+    /* Summary card */
+    .summary-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    /* Toast */
     #toast {
       position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 12px 20px;
-      font-size: 14px; font-weight: 600; color: var(--text);
-      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-      opacity: 0; pointer-events: none; transition: opacity 0.2s;
-      z-index: 200; white-space: nowrap;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 20px; font-size: 14px; font-weight: 600; color: var(--text);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6); opacity: 0; pointer-events: none;
+      transition: opacity 0.2s; z-index: 300; white-space: nowrap;
     }
     #toast.show { opacity: 1; }
     #toast.green { border-color: var(--accent); color: var(--accent); }
-    #toast.red   { border-color: var(--red); color: var(--red); }
-
-    /* ── Map pins / overlays ──────────────────────────────────────── */
+    #toast.red { border-color: var(--red); color: var(--red); }
+    /* Hint overlay */
+    #pick-hint {
+      position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+      background: rgba(10,10,10,0.9); color: var(--accent); padding: 8px 18px;
+      border-radius: 20px; font-size: 13px; font-weight: 700; pointer-events: none;
+      z-index: 20; display: none; white-space: nowrap;
+    }
+    /* Map pins */
     .map-pin {
-      width: 32px; height: 32px; border-radius: 50%;
-      border: 3px solid #fff; display: flex; align-items: center;
-      justify-content: center; font-size: 11px; font-weight: 900;
-      cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      width: 32px; height: 32px; border-radius: 50%; border: 3px solid #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 900; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
     }
-    .map-picking-hint {
-      position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
-      background: rgba(10,10,10,0.85); color: var(--accent);
-      padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700;
-      pointer-events: none; z-index: 10; white-space: nowrap;
-    }
-
-    /* ── Sync result ──────────────────────────────────────────────── */
-    .sync-result {
-      font-size: 13px; color: var(--text2); text-align: center;
-      padding: 8px 0; min-height: 22px;
-    }
-    .sync-result.ok { color: var(--accent); }
-    .sync-result.err { color: var(--red); }
-
-    /* ── Scrollbar ────────────────────────────────────────────────── */
+    /* Sync result */
+    .sync-msg { font-size: 13px; text-align: center; padding: 8px 0; min-height: 20px; }
+    .sync-msg.ok { color: var(--accent); }
+    .sync-msg.err { color: var(--red); }
+    /* Loading spinner inline */
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
-    /* ── Responsive ───────────────────────────────────────────────── */
     @media (max-width: 640px) {
-      .sidebar { width: 100%; height: 50vh; }
-      .main { flex-direction: column; }
-      #map { height: 50vh; }
+      .sidebar { width: 100%; height: 55vh; }
+      .main { flex-direction: column-reverse; }
+      #map { flex: 1; min-height: 45vh; }
     }
   </style>
 </head>
 <body>
 
-<!-- Auth overlay (shown until signed in) -->
+<!-- Auth overlay -->
 <div id="auth-panel">
   <div class="auth-card">
     <div class="auth-logo">Amble</div>
     <p class="auth-sub">Sign in with the same account you use in the app. Your planned trip syncs straight to your phone.</p>
     <p id="auth-err" class="auth-err"></p>
-    <button class="btn" id="auth-apple-btn" onclick="signInWithApple()" style="display:flex;align-items:center;justify-content:center;gap:10px;background:#000;color:#fff;width:100%">
-      <svg width="18" height="18" viewBox="0 0 814 1000" fill="white"><path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 442.9 37.1 262.3 71.5 159.4c20.8-60.7 73.1-100.9 130.9-100.9 56.7 0 93.2 37.9 166.1 37.9 68.7 0 111.9-37.9 170.5-37.9 57.9 0 109.8 34.6 132.9 87.7zm-45.8-187.4c-20.8 24.5-56.3 43.6-90.6 43.6-4.5 0-9-.6-13.5-1.3-1.3-4.5-1.9-9.7-1.9-14.8 0-44.2 29.3-90.5 61.6-116.2 19.5-15.5 54.7-27.3 84.1-27.9 1.3 5.2 1.9 10.3 1.9 15.5 0 46.1-27.9 90.5-41.6 101.1z"/></svg>
+    <button class="btn" id="btn-apple" onclick="signInWith('apple')"
+      style="display:flex;align-items:center;justify-content:center;gap:10px;background:#000;color:#fff;width:100%">
+      <svg width="16" height="16" viewBox="0 0 814 1000" fill="white"><path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 442.9 37.1 262.3 71.5 159.4c20.8-60.7 73.1-100.9 130.9-100.9 56.7 0 93.2 37.9 166.1 37.9 68.7 0 111.9-37.9 170.5-37.9 57.9 0 109.8 34.6 132.9 87.7zm-45.8-187.4c-20.8 24.5-56.3 43.6-90.6 43.6-4.5 0-9-.6-13.5-1.3-1.3-4.5-1.9-9.7-1.9-14.8 0-44.2 29.3-90.5 61.6-116.2 19.5-15.5 54.7-27.3 84.1-27.9 1.3 5.2 1.9 10.3 1.9 15.5 0 46.1-27.9 90.5-41.6 101.1z"/></svg>
       Continue with Apple
     </button>
-    <button class="btn btn-outline" id="auth-google-btn" onclick="signInWithGoogle()" style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%">
-      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.58-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+    <button class="btn btn-outline" id="btn-google" onclick="signInWith('google')"
+      style="display:flex;align-items:center;justify-content:center;gap:10px">
+      <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.58-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
       Continue with Google
     </button>
-    <p style="font-size:11px;color:var(--text3);text-align:center;line-height:1.6;margin-top:4px">
+    <p style="font-size:11px;color:var(--text3);text-align:center;line-height:1.6">
       Use the same account you signed in with on the Amble app.
     </p>
   </div>
 </div>
 
 <div class="app">
-  <!-- Top bar -->
   <header class="topbar">
     <a href="/" class="topbar-brand">Amble</a>
     <span class="topbar-title">Multi-day trip planner</span>
     <div class="topbar-auth">
-      <span id="user-email-display" style="font-size:12px;color:var(--text3)"></span>
-      <button class="btn btn-outline btn-small" onclick="signOut()">Sign out</button>
+      <span id="user-display" style="font-size:12px;color:var(--text3)"></span>
+      <button class="btn btn-outline btn-sm" onclick="signOut()">Sign out</button>
     </div>
   </header>
 
   <div class="main">
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
+    <aside class="sidebar">
 
-      <!-- Step indicator -->
-      <div style="padding: 12px 16px 0">
-        <div class="steps" id="step-dots">
-          <div class="step active" id="step-1"></div>
-          <div class="step" id="step-2"></div>
-          <div class="step" id="step-3"></div>
-          <div class="step" id="step-4"></div>
-        </div>
+      <div class="steps">
+        <div class="step active" id="s1"></div>
+        <div class="step" id="s2"></div>
+        <div class="step" id="s3"></div>
+        <div class="step" id="s4"></div>
       </div>
 
-      <!-- Step 1: Basic info -->
-      <div class="sidebar-section" id="panel-1">
+      <!-- Panel 1: Details -->
+      <div class="sidebar-section" id="p1">
         <div class="section-title">1 — Trip details</div>
+
         <div style="margin-bottom:12px">
           <label for="trip-name">Trip name</label>
           <input type="text" id="trip-name" placeholder="e.g. Peak District 3-day">
         </div>
 
-        <div style="margin-bottom:12px">
-          <label>Click the map to set start point</label>
-          <div class="endpoint-row" id="start-row" onclick="startPicking('start')">
-            <div class="endpoint-dot dot-start">S</div>
-            <div>
-              <div class="endpoint-label" id="start-label">Click to set start</div>
-              <div class="endpoint-coords" id="start-coords"></div>
-            </div>
+        <!-- Start search -->
+        <div style="margin-bottom:4px">
+          <label>Start point</label>
+          <div id="start-set" class="place-set" style="display:none">
+            <div class="place-dot dot-s">S</div>
+            <div class="place-set-name" id="start-set-name"></div>
+            <button class="place-set-change" onclick="clearPlace('start')">change</button>
           </div>
-          <div class="endpoint-row" id="end-row" onclick="startPicking('end')">
-            <div class="endpoint-dot dot-end">F</div>
-            <div>
-              <div class="endpoint-label" id="end-label">Click to set finish</div>
-              <div class="endpoint-coords" id="end-coords"></div>
-            </div>
+          <div class="place-wrap" id="start-search-wrap">
+            <input type="text" id="start-input" placeholder="Search for a place or click the map…" autocomplete="off"
+              oninput="onPlaceInput('start')" onfocus="onPlaceFocus('start')" onkeydown="onPlaceKey(event,'start')">
+            <button class="place-clear" id="start-clear" onclick="clearInput('start')">×</button>
+            <div class="place-results" id="start-results"></div>
           </div>
-          <label style="margin-bottom:6px;margin-top:4px">
-            <input type="checkbox" id="is-loop" style="width:auto;margin-right:6px" onchange="onLoopToggle()">
-            Loop trip (start = finish)
-          </label>
         </div>
 
-        <div class="stat-row" style="margin-bottom:12px">
+        <!-- Loop toggle -->
+        <label class="loop-row" style="margin-bottom:8px">
+          <input type="checkbox" id="is-loop" onchange="onLoopChange()">
+          <span>Loop trip (returns to start)</span>
+        </label>
+
+        <!-- Finish search -->
+        <div style="margin-bottom:12px" id="finish-wrap">
+          <label>Finish point</label>
+          <div id="finish-set" class="place-set" style="display:none">
+            <div class="place-dot dot-f">F</div>
+            <div class="place-set-name" id="finish-set-name"></div>
+            <button class="place-set-change" onclick="clearPlace('finish')">change</button>
+          </div>
+          <div class="place-wrap" id="finish-search-wrap">
+            <input type="text" id="finish-input" placeholder="Search for a place or click the map…" autocomplete="off"
+              oninput="onPlaceInput('finish')" onfocus="onPlaceFocus('finish')" onkeydown="onPlaceKey(event,'finish')">
+            <button class="place-clear" id="finish-clear" onclick="clearInput('finish')">×</button>
+            <div class="place-results" id="finish-results"></div>
+          </div>
+        </div>
+
+        <div class="stat-row">
           <div class="stat-box">
             <label>Days</label>
-            <input type="number" id="day-count" min="1" max="14" value="3" style="font-size:22px;font-weight:800;padding:4px 8px" onchange="onDayCountChange()">
+            <input type="number" id="day-count" min="1" max="14" value="3" oninput="updateGenBtn()">
             <div class="stat-sub">1 – 14</div>
           </div>
           <div class="stat-box">
-            <label>Target km/day</label>
-            <input type="number" id="km-day" min="3" max="40" value="15" style="font-size:22px;font-weight:800;padding:4px 8px">
+            <label>km / day</label>
+            <input type="number" id="km-day" min="3" max="40" value="15">
             <div class="stat-sub">3 – 40 km</div>
           </div>
         </div>
 
-        <button class="btn btn-accent" id="gen-skeleton-btn" onclick="generateSkeleton()" disabled>
+        <button class="btn btn-accent" id="gen-btn" onclick="generateSkeleton()" disabled>
           Generate skeleton route
         </button>
+        <div id="gen-err" style="font-size:12px;color:var(--red);margin-top:8px;min-height:16px"></div>
       </div>
 
-      <!-- Step 2: Skeleton review -->
-      <div class="sidebar-section" id="panel-2" style="display:none">
+      <!-- Panel 2: Skeleton -->
+      <div class="sidebar-section" id="p2" style="display:none">
         <div class="section-title">2 — Route skeleton</div>
-        <div id="day-list" style="margin-bottom:12px"></div>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">
-          Drag the numbered markers on the map to move where each day ends.
+        <div id="day-list" style="margin-bottom:10px"></div>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:10px">
+          Drag the numbered markers on the map to shift where each day ends.
         </p>
-        <button class="btn btn-outline btn-small" onclick="regenerateSkeleton()" style="margin-bottom:8px;width:100%">
-          ↺ Regenerate
-        </button>
-        <button class="btn btn-accent" onclick="goToStep(3)">
-          Confirm skeleton →
-        </button>
+        <button class="btn btn-outline btn-sm" onclick="goBack()" style="width:100%;margin-bottom:8px">‹ Change start / finish</button>
+        <button class="btn btn-outline btn-sm" onclick="regenerate()" style="width:100%;margin-bottom:8px">↺ Regenerate route</button>
+        <button class="btn btn-accent" onclick="goToStep(3)">Confirm skeleton →</button>
       </div>
 
-      <!-- Step 3: Pre-booked stops -->
-      <div class="sidebar-section" id="panel-3" style="display:none">
+      <!-- Panel 3: Stops -->
+      <div class="sidebar-section" id="p3" style="display:none">
         <div class="section-title">3 — Overnight stops (optional)</div>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">
-          Click the map near a hotel, hostel or campsite to pin an overnight stop to a specific day.
+        <p style="font-size:12px;color:var(--text3);margin-bottom:10px">
+          Pin hotel, hostel or campsite stops. Search by name or click the map.
         </p>
-        <div id="stops-list" style="margin-bottom:12px"></div>
-        <button class="btn btn-outline btn-small" id="add-stop-btn" onclick="startPickingStop()" style="width:100%;margin-bottom:8px">
-          + Pin overnight stop
-        </button>
-        <button class="btn btn-accent" onclick="goToStep(4)">
-          Continue →
-        </button>
+        <div id="stops-list" style="margin-bottom:10px"></div>
+        <!-- Stop search -->
+        <div style="margin-bottom:8px">
+          <label id="stop-search-label" style="display:none">Search for stop (after which day?)</label>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" id="stop-day-row" style="display:none">
+            <span style="font-size:12px;color:var(--text2)">After day</span>
+            <input type="number" id="stop-day-input" min="1" max="13" value="1" style="width:60px;padding:6px 8px;font-size:14px">
+            <span id="stop-day-max" style="font-size:11px;color:var(--text3)"></span>
+          </div>
+          <div class="place-wrap" id="stop-search-wrap" style="display:none">
+            <input type="text" id="stop-input" placeholder="Search for accommodation…" autocomplete="off"
+              oninput="onStopInput()" onkeydown="onStopKey(event)">
+            <button class="place-clear" id="stop-clear" onclick="clearStopInput()">×</button>
+            <div class="place-results" id="stop-results"></div>
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="add-stop-btn" onclick="showStopSearch()" style="width:100%;margin-bottom:8px">+ Add overnight stop</button>
+        <button class="btn btn-accent" onclick="goToStep(4)">Continue →</button>
       </div>
 
-      <!-- Step 4: Sync -->
-      <div class="sidebar-section" id="panel-4" style="display:none">
+      <!-- Panel 4: Sync -->
+      <div class="sidebar-section" id="p4" style="display:none">
         <div class="section-title">4 — Sync to phone</div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
-          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px" id="summary-name">—</div>
-          <div style="font-size:12px;color:var(--text2)" id="summary-stats">—</div>
+        <div class="summary-card">
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px" id="sum-name">—</div>
+          <div style="font-size:12px;color:var(--text2)" id="sum-stats">—</div>
         </div>
-        <button class="btn btn-accent" onclick="syncToPhone()" id="sync-btn">
-          ☁  Sync to Amble on my phone
-        </button>
-        <p class="sync-result" id="sync-result"></p>
-        <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px;line-height:1.5">
-          Open Amble on your phone → Profile → sync icon to pull the latest trips.
+        <button class="btn btn-accent" id="sync-btn" onclick="syncToPhone()">☁ Sync to Amble on my phone</button>
+        <div class="sync-msg" id="sync-msg"></div>
+        <p style="font-size:11px;color:var(--text3);text-align:center;line-height:1.5;margin-top:6px">
+          On your phone: Profile → pull-to-refresh or sync icon. The trip will appear in your multi-day planner.
         </p>
-        <div style="height:1px;background:var(--border);margin:16px 0"></div>
-        <button class="btn btn-outline btn-small" onclick="goToStep(1);resetTrip()" style="width:100%">
-          + Plan another trip
-        </button>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <button class="btn btn-outline btn-sm" onclick="newTrip()" style="width:100%">+ Plan another trip</button>
+        </div>
       </div>
 
     </aside>
 
-    <!-- Map -->
-    <div id="map"></div>
+    <div style="flex:1;position:relative">
+      <div id="map" style="width:100%;height:100%"></div>
+      <div id="pick-hint"></div>
+    </div>
   </div>
 </div>
 
-<!-- Picking hint overlay -->
-<div class="map-picking-hint" id="picking-hint" style="display:none"></div>
-
-<!-- Toast -->
 <div id="toast"></div>
 
 <script>
-// ── Config ────────────────────────────────────────────────────────────────────
 const SUPABASE_URL  = 'https://cygimxakzteygjeureqv.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_KPfqJPj4N5It7cy6y7DAZQ_8uIPQ0q8';
 const BROUTER_URL   = 'https://brouter.de/brouter';
 const MAP_STYLE     = 'https://tiles.openfreemap.org/styles/liberty';
+const DAY_COLORS    = ['#a3e635','#3b82f6','#f59e0b','#a855f7','#ec4899','#14b8a6','#f87171','#22c55e','#06b6d4','#fb923c','#84cc16','#e11d48','#7c3aed','#0ea5e9'];
 
-const DAY_COLORS = [
-  '#a3e635','#3b82f6','#f59e0b','#a855f7','#ec4899',
-  '#14b8a6','#f87171','#22c55e','#06b6d4','#fb923c',
-  '#84cc16','#e11d48','#7c3aed','#0ea5e9',
-];
-
-// ── Supabase ──────────────────────────────────────────────────────────────────
 const { createClient } = window.supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let currentStep = 1;
-let pickingMode = null; // 'start' | 'end' | 'stop'
-let stopPickingDayIndex = null;
+let trip = newTripObj();
+let pickingMode = null; // 'start'|'finish'|'stop'
+let stopPickDayIdx = null;
+let placeDebounce = {};
 
-let trip = {
-  id: null,
-  name: '',
-  start: null,        // {latitude, longitude}
-  startLabel: '',
-  finish: null,
-  finishLabel: '',
-  isLoop: false,
-  targetDayCount: 3,
-  targetKmPerDay: 15,
-  vias: [],
-  skeleton: null,     // {coordinates, distanceMetres, dayEnds}
-  skeletonCandidates: [],
-  days: [],
-  masterRoute: null,
-  preBookedStops: [],
-  accomPreferences: [],
-  notes: '',
-  stage: 'frame',
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
-
-// Skeleton day-end drag state
-let draggingDayEndIdx = null;
+function newTripObj() {
+  return {
+    id: crypto.randomUUID(), name: '',
+    start: null, startLabel: '', finish: null, finishLabel: '',
+    isLoop: false, targetDayCount: 3, targetKmPerDay: 15,
+    vias: [], skeleton: null, skeletonCandidates: [], days: [],
+    masterRoute: null, preBookedStops: [], accomPreferences: [], notes: '',
+    stage: 'frame', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  };
+}
 
 // ── Map ───────────────────────────────────────────────────────────────────────
-const map = new maplibregl.Map({
-  container: 'map',
-  style: MAP_STYLE,
-  center: [-1.8, 53.5], // UK centre
-  zoom: 6,
-});
+const map = new maplibregl.Map({ container: 'map', style: MAP_STYLE, center: [-1.8, 53.5], zoom: 6 });
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'top-right');
 
-let startMarker = null, endMarker = null;
-const dayEndMarkers = [];    // MapLibre Marker objects, one per day-end
-const stopMarkers = [];      // MapLibre Marker objects for pre-booked stops
+let startMarker = null, finishMarker = null;
+const dayEndMarkers = [], stopMarkers = [];
 
 map.on('load', () => {
-  // Route layers for each day
   for (let i = 0; i < 14; i++) {
-    map.addSource(`day-route-${i}`, { type: 'geojson', data: emptyGeoJSON() });
-    map.addLayer({
-      id: `day-route-line-${i}`,
-      type: 'line',
-      source: `day-route-${i}`,
-      paint: {
-        'line-color': DAY_COLORS[i % DAY_COLORS.length],
-        'line-width': 5,
-        'line-opacity': 0.9,
-      },
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-    });
+    map.addSource(`seg${i}`, { type: 'geojson', data: emptyGJ() });
+    map.addLayer({ id: `seg${i}`, type: 'line', source: `seg${i}`,
+      paint: { 'line-color': DAY_COLORS[i], 'line-width': 5, 'line-opacity': 0.9 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' } });
   }
 });
 
-map.on('click', (e) => {
+map.on('click', e => {
   if (!pickingMode) return;
   const { lng, lat } = e.lngLat;
   const coord = { latitude: lat, longitude: lng };
+  const label = `${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°${lng < 0 ? 'W' : 'E'}`;
 
   if (pickingMode === 'start') {
-    trip.start = coord;
-    trip.startLabel = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-    setMarker('start', lng, lat);
-    document.getElementById('start-label').textContent = trip.startLabel;
-    document.getElementById('start-label').classList.add('set');
-    document.getElementById('start-coords').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    document.getElementById('start-row').classList.remove('picking');
-    if (trip.isLoop) {
-      trip.finish = coord;
-      trip.finishLabel = trip.startLabel;
-    }
-  } else if (pickingMode === 'end') {
-    trip.finish = coord;
-    trip.finishLabel = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-    setMarker('end', lng, lat);
-    document.getElementById('end-label').textContent = trip.finishLabel;
-    document.getElementById('end-label').classList.add('set');
-    document.getElementById('end-coords').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    document.getElementById('end-row').classList.remove('picking');
+    setPlace('start', coord, label);
+  } else if (pickingMode === 'finish') {
+    setPlace('finish', coord, label);
   } else if (pickingMode === 'stop') {
-    addPreBookedStop(coord, stopPickingDayIndex);
-    stopPickingDayIndex = null;
+    placeStop(coord, stopPickDayIdx);
   }
-
-  pickingMode = null;
-  document.getElementById('picking-hint').style.display = 'none';
-  map.getCanvas().style.cursor = '';
-  updateGenBtn();
+  endPickMode();
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function checkSession() {
-  // Handle OAuth redirect: Supabase puts #access_token=...&refresh_token=...
-  // in the URL hash after Google sign-in. getSession() resolves it automatically
-  // in supabase-js v2 when called on page load — no manual parsing needed.
   const { data } = await sb.auth.getSession();
   if (data.session) {
-    // Clean the hash from the URL so refreshing doesn't re-trigger the flow.
-    if (window.location.hash) history.replaceState(null, '', window.location.pathname);
+    if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
     onSignedIn(data.session.user);
   }
 }
 
 function onSignedIn(user) {
   document.getElementById('auth-panel').style.display = 'none';
-  document.getElementById('user-email-display').textContent = user.email;
-  trip.id = trip.id || crypto.randomUUID();
+  document.getElementById('user-display').textContent = user.email || 'Signed in';
 }
 
-async function signInWithApple() {
+async function signInWith(provider) {
   document.getElementById('auth-err').textContent = '';
-  setBtnLoading('auth-apple-btn', true);
+  const btnId = provider === 'apple' ? 'btn-apple' : 'btn-google';
+  setLoading(btnId, true);
   const { error } = await sb.auth.signInWithOAuth({
-    provider: 'apple',
-    options: {
-      redirectTo: window.location.href,
-      scopes: 'name email',
-    },
+    provider,
+    options: { redirectTo: window.location.href, scopes: provider === 'apple' ? 'name email' : undefined },
   });
-  if (error) {
-    document.getElementById('auth-err').textContent = error.message;
-    setBtnLoading('auth-apple-btn', false);
-  }
-}
-
-async function signInWithGoogle() {
-  document.getElementById('auth-err').textContent = '';
-  setBtnLoading('auth-google-btn', true);
-  // Supabase Google OAuth — redirects back to this page with the session
-  // in the URL hash. The callback handler below picks it up on return.
-  const { error } = await sb.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.href },
-  });
-  if (error) {
-    document.getElementById('auth-err').textContent = error.message;
-    setBtnLoading('auth-google-btn', false);
-  }
-  // On success the browser redirects — no further code needed here.
+  if (error) { document.getElementById('auth-err').textContent = error.message; setLoading(btnId, false); }
 }
 
 async function signOut() {
   await sb.auth.signOut();
   document.getElementById('auth-panel').style.display = 'flex';
-  document.getElementById('user-email-display').textContent = '';
+  document.getElementById('user-display').textContent = '';
 }
 
-// ── Step navigation ───────────────────────────────────────────────────────────
+// ── Steps ─────────────────────────────────────────────────────────────────────
+let currentStep = 1;
 function goToStep(n) {
   currentStep = n;
-  for (let i = 1; i <= 4; i++) {
-    const panel = document.getElementById(`panel-${i}`);
-    const dot   = document.getElementById(`step-${i}`);
-    panel.style.display = i === n ? 'block' : 'none';
-    dot.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
-  }
-  if (n === 4) updateSummary();
+  ['p1','p2','p3','p4'].forEach((id, i) => {
+    document.getElementById(id).style.display = i + 1 === n ? 'block' : 'none';
+  });
+  ['s1','s2','s3','s4'].forEach((id, i) => {
+    document.getElementById(id).className = 'step' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
+  });
+  if (n === 3) renderStopList();
+  if (n === 4) renderSummary();
 }
 
-// ── Markers ───────────────────────────────────────────────────────────────────
-function makePin(letter, bg, fg = '#0a0a0a') {
-  const el = document.createElement('div');
-  el.className = 'map-pin';
-  el.style.background = bg;
-  el.style.color = fg;
-  el.textContent = letter;
-  return el;
+function goBack() { goToStep(1); }
+
+// ── Place search (Nominatim) ──────────────────────────────────────────────────
+let searchTimers = { start: null, finish: null, stop: null };
+
+async function searchPlaces(query) {
+  if (query.length < 2) return [];
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
+  try {
+    const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    return await r.json();
+  } catch { return []; }
 }
 
-function setMarker(which, lng, lat) {
+function onPlaceInput(which) {
+  const val = document.getElementById(`${which}-input`).value;
+  document.getElementById(`${which}-clear`).style.display = val ? 'block' : 'none';
+  clearTimeout(searchTimers[which]);
+  if (val.length < 2) { hideResults(which); return; }
+  searchTimers[which] = setTimeout(async () => {
+    const results = await searchPlaces(val);
+    showResults(which, results);
+  }, 300);
+}
+
+function onPlaceFocus(which) {
+  // Show pick-on-map hint
+  const hint = document.getElementById('pick-hint');
+  hint.textContent = which === 'start' ? '🟢 Or click the map to set start' : '🔴 Or click the map to set finish';
+  hint.style.display = 'block';
+  pickingMode = which;
+}
+
+function onPlaceKey(e, which) {
+  const results = document.getElementById(`${which}-results`);
+  const items = results.querySelectorAll('.place-result');
+  if (e.key === 'Escape') { hideResults(which); endPickMode(); }
+  if (e.key === 'Enter' && items.length > 0) items[0].click();
+}
+
+function showResults(which, results) {
+  const el = document.getElementById(`${which}-results`);
+  if (!results.length) { el.style.display = 'none'; return; }
+  el.innerHTML = results.map((r, i) =>
+    `<div class="place-result" onclick="selectPlace('${which}',${i})" data-idx="${i}">
+      <div>${r.display_name.split(',')[0]}</div>
+      <div class="place-result-sub">${r.display_name.split(',').slice(1, 3).join(',').trim()}</div>
+    </div>`
+  ).join('');
+  el._data = results;
+  el.style.display = 'block';
+}
+
+function hideResults(which) {
+  document.getElementById(`${which}-results`).style.display = 'none';
+}
+
+function selectPlace(which, idx) {
+  const el = document.getElementById(`${which}-results`);
+  const r = el._data[idx];
+  const coord = { latitude: parseFloat(r.lat), longitude: parseFloat(r.lon) };
+  const label = r.display_name.split(',').slice(0, 2).join(',').trim();
+  setPlace(which, coord, label);
+  hideResults(which);
+  endPickMode();
+}
+
+function setPlace(which, coord, label) {
   if (which === 'start') {
+    trip.start = coord; trip.startLabel = label;
+    if (trip.isLoop) { trip.finish = coord; trip.finishLabel = label; updateFinishDisplay(); }
+    // Map marker
     if (startMarker) startMarker.remove();
     startMarker = new maplibregl.Marker({ element: makePin('S', '#a3e635') })
-      .setLngLat([lng, lat]).addTo(map);
+      .setLngLat([coord.longitude, coord.latitude]).addTo(map);
+    map.flyTo({ center: [coord.longitude, coord.latitude], zoom: Math.max(map.getZoom(), 10) });
   } else {
-    if (endMarker) endMarker.remove();
-    endMarker = new maplibregl.Marker({ element: makePin('F', '#ef4444', '#fff') })
-      .setLngLat([lng, lat]).addTo(map);
+    trip.finish = coord; trip.finishLabel = label;
+    if (finishMarker) finishMarker.remove();
+    finishMarker = new maplibregl.Marker({ element: makePin('F', '#ef4444', '#fff') })
+      .setLngLat([coord.longitude, coord.latitude]).addTo(map);
+    map.flyTo({ center: [coord.longitude, coord.latitude], zoom: Math.max(map.getZoom(), 10) });
+  }
+  // Show "set" pill, hide search box
+  document.getElementById(`${which}-set-name`).textContent = label;
+  document.getElementById(`${which}-set`).style.display = 'flex';
+  document.getElementById(`${which}-search-wrap`).style.display = 'none';
+  document.getElementById(`${which}-input`).value = '';
+  updateGenBtn();
+}
+
+function updateFinishDisplay() {
+  if (trip.isLoop && trip.start) {
+    document.getElementById('finish-set-name').textContent = trip.startLabel + ' (loop)';
+    document.getElementById('finish-set').style.display = 'flex';
+    document.getElementById('finish-search-wrap').style.display = 'none';
   }
 }
 
-function clearDayEndMarkers() {
-  dayEndMarkers.forEach(m => m.remove());
-  dayEndMarkers.length = 0;
+function clearPlace(which) {
+  if (which === 'start') {
+    trip.start = null; trip.startLabel = '';
+    if (startMarker) { startMarker.remove(); startMarker = null; }
+    if (trip.isLoop) { trip.finish = null; trip.finishLabel = ''; updateFinishDisplay(); }
+  } else {
+    trip.finish = null; trip.finishLabel = '';
+    if (finishMarker) { finishMarker.remove(); finishMarker = null; }
+  }
+  document.getElementById(`${which}-set`).style.display = 'none';
+  document.getElementById(`${which}-search-wrap`).style.display = 'block';
+  updateGenBtn();
+}
+
+function clearInput(which) {
+  document.getElementById(`${which}-input`).value = '';
+  document.getElementById(`${which}-clear`).style.display = 'none';
+  hideResults(which);
+}
+
+function onLoopChange() {
+  trip.isLoop = document.getElementById('is-loop').checked;
+  const wrap = document.getElementById('finish-wrap');
+  wrap.style.opacity = trip.isLoop ? '0.4' : '1';
+  wrap.style.pointerEvents = trip.isLoop ? 'none' : '';
+  if (trip.isLoop && trip.start) {
+    trip.finish = trip.start; trip.finishLabel = trip.startLabel;
+    updateFinishDisplay();
+  } else if (!trip.isLoop) {
+    trip.finish = null; trip.finishLabel = '';
+    document.getElementById('finish-set').style.display = 'none';
+    document.getElementById('finish-search-wrap').style.display = 'block';
+  }
+  updateGenBtn();
+}
+
+function endPickMode() {
+  pickingMode = null;
+  document.getElementById('pick-hint').style.display = 'none';
+  map.getCanvas().style.cursor = '';
+}
+
+// ── Generate skeleton ─────────────────────────────────────────────────────────
+async function generateSkeleton() {
+  document.getElementById('gen-err').textContent = '';
+  trip.name = document.getElementById('trip-name').value.trim() || 'My trip';
+  trip.targetDayCount = Math.max(1, Math.min(14, parseInt(document.getElementById('day-count').value, 10) || 3));
+  trip.targetKmPerDay = Math.max(3, Math.min(40, parseInt(document.getElementById('km-day').value, 10) || 15));
+
+  if (!trip.start) { document.getElementById('gen-err').textContent = 'Set a start point first.'; return; }
+  if (!trip.finish && !trip.isLoop) { document.getElementById('gen-err').textContent = 'Set a finish point first.'; return; }
+
+  const finish = trip.isLoop ? trip.start : trip.finish;
+  setLoading('gen-btn', true);
+
+  try {
+    const coords = await routeBRouter(trip.start, finish, trip.isLoop);
+    if (!coords || coords.length < 2) throw new Error('No route found — try different start/finish points');
+
+    const totalM = totalDist(coords);
+    trip.skeleton = {
+      coordinates: coords,
+      distanceMetres: totalM,
+      dayEnds: equalDayEnds(coords, trip.targetDayCount),
+    };
+    trip.stage = 'skeleton';
+    trip.updatedAt = new Date().toISOString();
+
+    renderOnMap();
+    placeDayEndMarkers();
+    renderDayList();
+    fitMap(coords);
+    goToStep(2);
+  } catch (e) {
+    document.getElementById('gen-err').textContent = '⚠ ' + (e.message || 'Route generation failed');
+    toast(e.message || 'Route generation failed', 'red');
+  }
+  setLoading('gen-btn', false);
+}
+
+async function regenerate() {
+  goToStep(1);
+  await generateSkeleton();
+}
+
+// ── BRouter ───────────────────────────────────────────────────────────────────
+async function routeBRouter(start, finish, isLoop) {
+  // For a loop, add an intermediate waypoint offset slightly so BRouter
+  // doesn't return a trivial zero-distance route
+  let lonlats;
+  if (isLoop) {
+    // Offset midpoint ~5km north to encourage a real loop
+    const mid = { latitude: start.latitude + 0.045, longitude: start.longitude };
+    lonlats = `${start.longitude},${start.latitude}|${mid.longitude},${mid.latitude}|${finish.longitude},${finish.latitude}`;
+  } else {
+    lonlats = `${start.longitude},${start.latitude}|${finish.longitude},${finish.latitude}`;
+  }
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
+  const r = await fetch(url);
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Routing failed (${r.status})${text ? ': ' + text.slice(0, 80) : ''}`);
+  }
+  const gj = await r.json();
+  const feat = gj.features?.[0];
+  if (!feat) throw new Error('No route returned from routing service');
+  return feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+}
+
+// ── Geometry helpers ──────────────────────────────────────────────────────────
+function haversine(a, b) {
+  const R = 6371000, r = d => d * Math.PI / 180;
+  const dLat = r(b.latitude - a.latitude), dLon = r(b.longitude - a.longitude);
+  const h = Math.sin(dLat/2)**2 + Math.cos(r(a.latitude)) * Math.cos(r(b.latitude)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function totalDist(coords) { let d = 0; for (let i = 1; i < coords.length; i++) d += haversine(coords[i-1], coords[i]); return d; }
+function cumDist(coords) { const c = [0]; for (let i = 1; i < coords.length; i++) c.push(c[i-1] + haversine(coords[i-1], coords[i])); return c; }
+function equalDayEnds(coords, days) {
+  const c = cumDist(coords), tot = c[c.length - 1], ends = [];
+  for (let d = 1; d < days; d++) {
+    const target = (d / days) * tot;
+    let best = 1;
+    for (let i = 1; i < c.length; i++) { if (c[i] >= target) { best = i; break; } }
+    ends.push({ kind: 'cut', index: best });
+  }
+  return ends;
+}
+function nearestIdx(coords, lat, lng) {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    const d = (coords[i].latitude - lat)**2 + (coords[i].longitude - lng)**2;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function boundaries() {
+  const { coordinates, dayEnds } = trip.skeleton;
+  return [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestIdx(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
+}
+
+// ── Map rendering ─────────────────────────────────────────────────────────────
+function emptyGJ() { return { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } }; }
+
+function renderOnMap() {
+  if (!trip.skeleton || !map.isStyleLoaded()) return;
+  const { coordinates } = trip.skeleton;
+  const b = boundaries(), n = trip.targetDayCount;
+  for (let i = 0; i < 14; i++) {
+    const src = map.getSource(`seg${i}`);
+    if (!src) continue;
+    src.setData(i < n
+      ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coordinates.slice(b[i], b[i+1] + 1).map(c => [c.longitude, c.latitude]) } }
+      : emptyGJ());
+  }
 }
 
 function placeDayEndMarkers() {
-  clearDayEndMarkers();
+  dayEndMarkers.forEach(m => m.remove()); dayEndMarkers.length = 0;
   if (!trip.skeleton) return;
   const { coordinates, dayEnds } = trip.skeleton;
   dayEnds.forEach((de, i) => {
     const coord = de.kind === 'pinned' ? de.coord : coordinates[de.index];
     if (!coord) return;
     const color = DAY_COLORS[i % DAY_COLORS.length];
-    const el = makePin(String(i + 1), '#0a0a0a', color);
+    const el = makePin(String(i + 1), '#141414', color);
     el.style.border = `3px solid ${color}`;
     el.style.cursor = 'grab';
-    const marker = new maplibregl.Marker({ element: el, draggable: true })
-      .setLngLat([coord.longitude, coord.latitude])
-      .addTo(map);
-    // On drag end, snap to nearest polyline vertex
-    marker.on('dragend', () => {
-      const lngLat = marker.getLngLat();
-      const nearestIdx = nearestVertexIndex(coordinates, lngLat.lat, lngLat.lng);
-      const nearestCoord = coordinates[nearestIdx];
-      marker.setLngLat([nearestCoord.longitude, nearestCoord.latitude]);
-      trip.skeleton.dayEnds[i] = { kind: 'cut', index: nearestIdx };
+    const m = new maplibregl.Marker({ element: el, draggable: true })
+      .setLngLat([coord.longitude, coord.latitude]).addTo(map);
+    m.on('dragend', () => {
+      const { lat, lng } = m.getLngLat();
+      const idx = nearestIdx(coordinates, lat, lng);
+      const c = coordinates[idx];
+      m.setLngLat([c.longitude, c.latitude]);
+      trip.skeleton.dayEnds[i] = { kind: 'cut', index: idx };
       trip.updatedAt = new Date().toISOString();
-      renderDayList();
-      renderSkeletonOnMap();
+      renderOnMap(); renderDayList();
     });
-    dayEndMarkers.push(marker);
+    dayEndMarkers.push(m);
   });
 }
 
-// ── Picking mode ──────────────────────────────────────────────────────────────
-function startPicking(which) {
-  pickingMode = which;
-  const hint = document.getElementById('picking-hint');
-  hint.textContent = which === 'start' ? '🟢 Click map to set start point' : '🔴 Click map to set finish point';
-  hint.style.display = 'block';
-  map.getCanvas().style.cursor = 'crosshair';
-  document.getElementById(which === 'start' ? 'start-row' : 'end-row').classList.add('picking');
-  if (which === 'end') document.getElementById('end-row').classList.add('picking');
+function makePin(text, bg, fg = '#0a0a0a') {
+  const el = document.createElement('div');
+  el.className = 'map-pin';
+  el.style.background = bg;
+  el.style.color = fg;
+  el.textContent = text;
+  return el;
 }
 
-function startPickingStop() {
-  const n = parseInt(document.getElementById('day-count').value, 10);
-  // Ask which day
-  const day = prompt(`Pin overnight stop to which day? (1 – ${n - 1}, night after that day)`, '1');
-  if (!day) return;
-  const dayIdx = parseInt(day, 10) - 1;
-  if (isNaN(dayIdx) || dayIdx < 0 || dayIdx >= n - 1) {
-    toast('Enter a day between 1 and ' + (n - 1), 'red'); return;
+function fitMap(coords) {
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const c of coords) {
+    if (c.latitude < minLat) minLat = c.latitude; if (c.latitude > maxLat) maxLat = c.latitude;
+    if (c.longitude < minLng) minLng = c.longitude; if (c.longitude > maxLng) maxLng = c.longitude;
   }
-  stopPickingDayIndex = dayIdx;
-  pickingMode = 'stop';
-  const hint = document.getElementById('picking-hint');
-  hint.textContent = `📍 Click map to pin overnight stop after Day ${dayIdx + 1}`;
-  hint.style.display = 'block';
-  map.getCanvas().style.cursor = 'crosshair';
+  map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 60, left: 60, right: 60 }, duration: 800 });
 }
 
-// ── Skeleton generation ───────────────────────────────────────────────────────
-async function generateSkeleton() {
-  if (!trip.start || !trip.finish) return;
-  trip.name = document.getElementById('trip-name').value.trim() || 'My trip';
-  trip.targetDayCount = parseInt(document.getElementById('day-count').value, 10);
-  trip.targetKmPerDay = parseInt(document.getElementById('km-day').value, 10);
-  trip.isLoop = document.getElementById('is-loop').checked;
-
-  setBtnLoading('gen-skeleton-btn', true);
-  try {
-    const coords = await routeViaBRouter(trip.start, trip.finish);
-    if (!coords || coords.length < 2) throw new Error('No route found between these points');
-
-    const totalMetres = calcTotalDistance(coords);
-    const dayEnds = buildEqualDayEnds(coords, trip.targetDayCount);
-
-    trip.skeleton = { coordinates: coords, distanceMetres: totalMetres, dayEnds };
-    trip.stage = 'skeleton';
-    trip.updatedAt = new Date().toISOString();
-
-    renderSkeletonOnMap();
-    placeDayEndMarkers();
-    renderDayList();
-    fitMapToCoords(coords);
-    goToStep(2);
-  } catch (e) {
-    toast('Could not generate route: ' + e.message, 'red');
-  }
-  setBtnLoading('gen-skeleton-btn', false);
-}
-
-async function regenerateSkeleton() {
-  setBtnLoading('gen-skeleton-btn', true);
-  await generateSkeleton();
-}
-
-// ── BRouter routing ───────────────────────────────────────────────────────────
-async function routeViaBRouter(start, finish) {
-  // BRouter HTTP API — free, no key, hiking profile
-  const lonlats = `${start.longitude},${start.latitude}|${finish.longitude},${finish.latitude}`;
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`);
-  const gj = await res.json();
-  const feature = gj.features?.[0];
-  if (!feature) throw new Error('No route in BRouter response');
-  return feature.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-}
-
-// ── Skeleton helpers ──────────────────────────────────────────────────────────
-function calcTotalDistance(coords) {
-  let d = 0;
-  for (let i = 1; i < coords.length; i++) d += haversineMetres(coords[i - 1], coords[i]);
-  return d;
-}
-
-function haversineMetres(a, b) {
-  const R = 6371000, toRad = d => d * Math.PI / 180;
-  const dLat = toRad(b.latitude - a.latitude);
-  const dLon = toRad(b.longitude - a.longitude);
-  const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLon/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-function buildCumDist(coords) {
-  const out = [0];
-  for (let i = 1; i < coords.length; i++) out.push(out[i-1] + haversineMetres(coords[i-1], coords[i]));
-  return out;
-}
-
-function buildEqualDayEnds(coords, days) {
-  const cum = buildCumDist(coords);
-  const total = cum[cum.length - 1];
-  const ends = [];
-  for (let d = 1; d < days; d++) {
-    const target = (d / days) * total;
-    let best = 1;
-    for (let i = 1; i < cum.length; i++) {
-      if (cum[i] >= target) { best = i; break; }
-    }
-    ends.push({ kind: 'cut', index: best });
-  }
-  return ends;
-}
-
-function nearestVertexIndex(coords, lat, lng) {
-  let best = 0, bestDist = Infinity;
-  for (let i = 0; i < coords.length; i++) {
-    const dx = coords[i].longitude - lng, dy = coords[i].latitude - lat;
-    const d = dx*dx + dy*dy;
-    if (d < bestDist) { bestDist = d; best = i; }
-  }
-  return best;
-}
-
-// ── Render skeleton on map ────────────────────────────────────────────────────
-function renderSkeletonOnMap() {
-  if (!trip.skeleton || !map.isStyleLoaded()) return;
-  const { coordinates, dayEnds } = trip.skeleton;
-  const n = trip.targetDayCount;
-  const boundaries = [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestVertexIndex(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
-
-  for (let i = 0; i < 14; i++) {
-    const src = map.getSource(`day-route-${i}`);
-    if (!src) continue;
-    if (i < n) {
-      const slice = coordinates.slice(boundaries[i], boundaries[i+1] + 1);
-      src.setData({
-        type: 'Feature', properties: {},
-        geometry: { type: 'LineString', coordinates: slice.map(c => [c.longitude, c.latitude]) },
-      });
-    } else {
-      src.setData(emptyGeoJSON());
-    }
-  }
-}
-
-function emptyGeoJSON() {
-  return { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } };
-}
-
-// ── Day list (sidebar) ────────────────────────────────────────────────────────
+// ── Day list ──────────────────────────────────────────────────────────────────
 function renderDayList() {
   if (!trip.skeleton) return;
-  const { coordinates, dayEnds } = trip.skeleton;
-  const cum = buildCumDist(coordinates);
-  const total = cum[cum.length - 1];
-  const n = trip.targetDayCount;
-  const boundaries = [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestVertexIndex(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
-
+  const { coordinates } = trip.skeleton;
+  const c = cumDist(coordinates), b = boundaries(), n = trip.targetDayCount;
   let html = '';
   for (let i = 0; i < n; i++) {
-    const km = ((cum[boundaries[i+1]] - cum[boundaries[i]]) / 1000).toFixed(1);
+    const km = ((c[b[i+1]] - c[b[i]]) / 1000).toFixed(1);
     const color = DAY_COLORS[i % DAY_COLORS.length];
     const stop = trip.preBookedStops.find(s => s.dayIndex === i);
     html += `<div class="day-row">
@@ -802,186 +768,185 @@ function renderDayList() {
   document.getElementById('day-list').innerHTML = html;
 }
 
-// ── Pre-booked stops ──────────────────────────────────────────────────────────
-async function addPreBookedStop(coord, dayIndex) {
-  pickingMode = null;
-  document.getElementById('picking-hint').style.display = 'none';
-  map.getCanvas().style.cursor = '';
+// ── Overnight stops ───────────────────────────────────────────────────────────
+function showStopSearch() {
+  const n = trip.targetDayCount;
+  document.getElementById('stop-search-label').style.display = 'block';
+  document.getElementById('stop-day-row').style.display = 'flex';
+  document.getElementById('stop-day-max').textContent = `(1 – ${n - 1})`;
+  document.getElementById('stop-day-input').max = n - 1;
+  document.getElementById('stop-search-wrap').style.display = 'block';
+  document.getElementById('stop-input').focus();
+}
 
-  // Reverse geocode with Nominatim
-  let name = `Stop (Day ${dayIndex + 1})`;
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`);
-    const j = await res.json();
-    name = j.name || j.display_name?.split(',')[0] || name;
-  } catch { /* ignore */ }
+async function onStopInput() {
+  const val = document.getElementById('stop-input').value;
+  document.getElementById('stop-clear').style.display = val ? 'block' : 'none';
+  clearTimeout(searchTimers.stop);
+  if (val.length < 2) { document.getElementById('stop-results').style.display = 'none'; return; }
+  searchTimers.stop = setTimeout(async () => {
+    const results = await searchPlaces(val);
+    const el = document.getElementById('stop-results');
+    if (!results.length) { el.style.display = 'none'; return; }
+    el.innerHTML = results.map((r, i) =>
+      `<div class="place-result" onclick="selectStop(${i})">
+        <div>${r.display_name.split(',')[0]}</div>
+        <div class="place-result-sub">${r.display_name.split(',').slice(1,3).join(',').trim()}</div>
+      </div>`
+    ).join('');
+    el._data = results;
+    el.style.display = 'block';
+  }, 300);
+}
 
+function onStopKey(e) {
+  if (e.key === 'Enter') {
+    const el = document.getElementById('stop-results');
+    const items = el.querySelectorAll('.place-result');
+    if (items.length) items[0].click();
+  }
+}
+
+function selectStop(idx) {
+  const el = document.getElementById('stop-results');
+  const r = el._data[idx];
+  const coord = { latitude: parseFloat(r.lat), longitude: parseFloat(r.lon) };
+  const name = r.display_name.split(',').slice(0, 2).join(',').trim();
+  const dayIdx = parseInt(document.getElementById('stop-day-input').value, 10) - 1;
+  placeStop(coord, dayIdx, name);
+  clearStopInput();
+  hideStopSearch();
+}
+
+function clearStopInput() {
+  document.getElementById('stop-input').value = '';
+  document.getElementById('stop-clear').style.display = 'none';
+  document.getElementById('stop-results').style.display = 'none';
+}
+
+function hideStopSearch() {
+  document.getElementById('stop-search-label').style.display = 'none';
+  document.getElementById('stop-day-row').style.display = 'none';
+  document.getElementById('stop-search-wrap').style.display = 'none';
+}
+
+async function placeStop(coord, dayIdx, name) {
+  if (!name) {
+    // Reverse geocode
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`);
+      const j = await r.json();
+      name = j.name || j.display_name?.split(',')[0] || `Stop (Day ${dayIdx + 1})`;
+    } catch { name = `Stop (Day ${dayIdx + 1})`; }
+  }
   const id = crypto.randomUUID();
-  trip.preBookedStops.push({ id, coord, name, dayIndex });
+  trip.preBookedStops.push({ id, coord, name, dayIndex: dayIdx });
   trip.updatedAt = new Date().toISOString();
-
-  // Place marker on map
   const el = document.createElement('div');
-  el.innerHTML = '🏨';
-  el.style.cssText = 'font-size:24px;cursor:pointer';
+  el.textContent = '🏨'; el.style.cssText = 'font-size:22px;cursor:pointer';
   const m = new maplibregl.Marker({ element: el }).setLngLat([coord.longitude, coord.latitude]).addTo(map);
-  stopMarkers.push({ marker: m, id });
-
-  renderStopList();
-  renderDayList();
-  toast(`Pinned: ${name}`, 'green');
+  stopMarkers.push({ id, marker: m });
+  renderStopList(); renderDayList();
+  toast(`📍 ${name}`, 'green');
 }
 
 function renderStopList() {
   const list = document.getElementById('stops-list');
-  if (trip.preBookedStops.length === 0) {
-    list.innerHTML = '<p style="font-size:12px;color:var(--text3)">No stops pinned yet</p>';
-    return;
+  if (!trip.preBookedStops.length) {
+    list.innerHTML = '<p style="font-size:12px;color:var(--text3)">No stops pinned yet — optional</p>'; return;
   }
   list.innerHTML = trip.preBookedStops.map(s =>
     `<div class="stop-row">
-      <span>🏨 ${s.name}</span>
-      <span class="stop-day">after Day ${s.dayIndex + 1}</span>
-      <button class="btn btn-outline btn-small" style="padding:4px 8px" onclick="removeStop('${s.id}')">✕</button>
+      <span class="stop-row-name">🏨 ${s.name}</span>
+      <span class="stop-row-day">after Day ${s.dayIndex + 1}</span>
+      <button class="btn btn-outline btn-sm" style="padding:4px 8px;flex-shrink:0" onclick="removeStop('${s.id}')">✕</button>
     </div>`
   ).join('');
 }
 
 function removeStop(id) {
-  const idx = trip.preBookedStops.findIndex(s => s.id === id);
-  if (idx === -1) return;
-  trip.preBookedStops.splice(idx, 1);
+  trip.preBookedStops = trip.preBookedStops.filter(s => s.id !== id);
   const mi = stopMarkers.findIndex(m => m.id === id);
   if (mi !== -1) { stopMarkers[mi].marker.remove(); stopMarkers.splice(mi, 1); }
-  renderStopList();
-  renderDayList();
+  renderStopList(); renderDayList();
 }
 
-// ── Summary ───────────────────────────────────────────────────────────────────
-function updateSummary() {
-  document.getElementById('summary-name').textContent = trip.name || 'Unnamed trip';
+// ── Summary & sync ────────────────────────────────────────────────────────────
+function renderSummary() {
+  document.getElementById('sum-name').textContent = trip.name || 'Unnamed trip';
   const km = trip.skeleton ? (trip.skeleton.distanceMetres / 1000).toFixed(1) : '?';
-  document.getElementById('summary-stats').textContent =
-    `${trip.targetDayCount} days · ${km} km total · ${trip.preBookedStops.length} stops pinned`;
+  document.getElementById('sum-stats').textContent =
+    `${trip.targetDayCount} days · ${km} km total · ${trip.preBookedStops.length} overnight stop${trip.preBookedStops.length !== 1 ? 's' : ''}`;
 }
 
-// ── Sync ──────────────────────────────────────────────────────────────────────
 async function syncToPhone() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { toast('Not signed in', 'red'); return; }
-  const userId = session.user.id;
-
-  setBtnLoading('sync-btn', true);
-  document.getElementById('sync-result').textContent = '';
-  document.getElementById('sync-result').className = 'sync-result';
-
+  setLoading('sync-btn', true);
+  const msg = document.getElementById('sync-msg');
+  msg.textContent = ''; msg.className = 'sync-msg';
   trip.updatedAt = new Date().toISOString();
-  trip.stage = 'skeleton'; // lands on skeleton-review step in the app
-
-  const row = {
-    id: trip.id,
-    user_id: userId,
-    data: trip,
-    updated_at: trip.updatedAt,
-  };
-
-  const { error } = await sb.from('cloud_trips').upsert(row, { onConflict: 'id,user_id' });
-  setBtnLoading('sync-btn', false);
-
+  trip.stage = 'skeleton';
+  const { error } = await sb.from('cloud_trips').upsert(
+    { id: trip.id, user_id: session.user.id, data: trip, updated_at: trip.updatedAt },
+    { onConflict: 'id,user_id' }
+  );
+  setLoading('sync-btn', false);
   if (error) {
-    document.getElementById('sync-result').textContent = '✕ Sync failed: ' + error.message;
-    document.getElementById('sync-result').className = 'sync-result err';
+    msg.textContent = '✕ ' + error.message; msg.className = 'sync-msg err';
     toast('Sync failed', 'red');
   } else {
-    document.getElementById('sync-result').textContent = '✓ Synced! Pull on your phone to load.';
-    document.getElementById('sync-result').className = 'sync-result ok';
-    toast('Synced to cloud ✓', 'green');
+    msg.textContent = '✓ Synced! Open Amble on your phone and pull to refresh.'; msg.className = 'sync-msg ok';
+    toast('Synced ✓', 'green');
   }
 }
 
-// ── Map fit ───────────────────────────────────────────────────────────────────
-function fitMapToCoords(coords) {
-  if (!coords || coords.length === 0) return;
-  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-  for (const c of coords) {
-    if (c.latitude < minLat) minLat = c.latitude;
-    if (c.latitude > maxLat) maxLat = c.latitude;
-    if (c.longitude < minLng) minLng = c.longitude;
-    if (c.longitude > maxLng) maxLng = c.longitude;
-  }
-  map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800 });
-}
-
-// ── UI helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function updateGenBtn() {
-  const ready = trip.start && (trip.finish || trip.isLoop) && trip.id;
-  document.getElementById('gen-skeleton-btn').disabled = !ready;
+  const ready = trip.start && (trip.finish || trip.isLoop);
+  document.getElementById('gen-btn').disabled = !ready;
 }
 
-function onDayCountChange() {
-  trip.targetDayCount = parseInt(document.getElementById('day-count').value, 10);
+function setLoading(id, on) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  b._orig = b._orig || b.innerHTML;
+  b.disabled = on;
+  b.innerHTML = on ? '<span class="spinner"></span>Please wait…' : b._orig;
 }
 
-function onLoopToggle() {
-  trip.isLoop = document.getElementById('is-loop').checked;
-  const endRow = document.getElementById('end-row');
-  endRow.style.opacity = trip.isLoop ? '0.4' : '1';
-  endRow.style.pointerEvents = trip.isLoop ? 'none' : '';
-  if (trip.isLoop && trip.start) {
-    trip.finish = trip.start;
-    trip.finishLabel = trip.startLabel;
-  }
-  updateGenBtn();
-}
-
-function setBtnLoading(id, loading) {
-  const btn = document.getElementById(id);
-  if (!btn) return;
-  btn.disabled = loading;
-  btn._origText = btn._origText || btn.textContent;
-  btn.textContent = loading ? '…' : btn._origText;
-}
-
-function resetTrip() {
-  trip = {
-    id: crypto.randomUUID(),
-    name: '', start: null, startLabel: '', finish: null, finishLabel: '',
-    isLoop: false, targetDayCount: 3, targetKmPerDay: 15,
-    vias: [], skeleton: null, skeletonCandidates: [], days: [],
-    masterRoute: null, preBookedStops: [], accomPreferences: [], notes: '',
-    stage: 'frame',
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  };
-  if (startMarker) { startMarker.remove(); startMarker = null; }
-  if (endMarker)   { endMarker.remove();   endMarker = null; }
-  clearDayEndMarkers();
-  stopMarkers.forEach(m => m.marker.remove()); stopMarkers.length = 0;
-  for (let i = 0; i < 14; i++) {
-    const src = map.getSource(`day-route-${i}`);
-    if (src) src.setData(emptyGeoJSON());
-  }
-  document.getElementById('trip-name').value = '';
-  document.getElementById('start-label').textContent = 'Click to set start';
-  document.getElementById('start-label').classList.remove('set');
-  document.getElementById('end-label').textContent = 'Click to set finish';
-  document.getElementById('end-label').classList.remove('set');
-  document.getElementById('start-coords').textContent = '';
-  document.getElementById('end-coords').textContent = '';
-  updateGenBtn();
-}
-
-let toastTimer = null;
+let toastT = null;
 function toast(msg, type = '') {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'show' + (type ? ' ' + type : '');
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = ''; }, 3000);
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.className = '', 3500);
+}
+
+function newTrip() {
+  trip = newTripObj();
+  if (startMarker) { startMarker.remove(); startMarker = null; }
+  if (finishMarker) { finishMarker.remove(); finishMarker = null; }
+  dayEndMarkers.forEach(m => m.remove()); dayEndMarkers.length = 0;
+  stopMarkers.forEach(m => m.marker.remove()); stopMarkers.length = 0;
+  for (let i = 0; i < 14; i++) { const s = map.getSource(`seg${i}`); if (s) s.setData(emptyGJ()); }
+  // Reset UI
+  document.getElementById('trip-name').value = '';
+  document.getElementById('start-set').style.display = 'none';
+  document.getElementById('start-search-wrap').style.display = 'block';
+  document.getElementById('finish-set').style.display = 'none';
+  document.getElementById('finish-search-wrap').style.display = 'block';
+  document.getElementById('is-loop').checked = false;
+  document.getElementById('finish-wrap').style.opacity = '1';
+  document.getElementById('finish-wrap').style.pointerEvents = '';
+  document.getElementById('gen-err').textContent = '';
+  document.getElementById('sync-msg').textContent = '';
+  goToStep(1); updateGenBtn();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 checkSession();
-trip.id = crypto.randomUUID();
 </script>
 </body>
 </html>
