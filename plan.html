@@ -222,6 +222,27 @@
     .alt-surface { font-size: 11px; color: var(--text3); text-align: center; margin-bottom: 6px; }
     .sparkline-wrap { width: 100%; height: 32px; position: relative; overflow: hidden; }
     .sparkline-placeholder { width: 100%; height: 32px; background: var(--surface); border-radius: 4px; opacity: 0.5; }
+    /* Elevation profile */
+    .elev-toggle {
+      display: flex; align-items: center; gap: 6px; width: 100%;
+      padding: 8px 0; background: none; border: none; cursor: pointer;
+      font-size: 12px; font-weight: 700; color: var(--text3);
+      letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 4px;
+    }
+    .elev-toggle:hover { color: var(--accent); }
+    .elev-panel {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 10px; position: relative; user-select: none;
+    }
+    .elev-svg { width: 100%; display: block; cursor: crosshair; }
+    .elev-scrubber {
+      position: absolute; top: 10px; bottom: 24px; width: 2px;
+      background: var(--accent); pointer-events: none; border-radius: 1px;
+    }
+    .elev-stats { display: flex; justify-content: space-between; margin-top: 6px; }
+    .elev-stat { font-size: 11px; color: var(--text3); }
+    .elev-stat span { font-weight: 700; color: var(--text2); }
+    .elev-coord { font-size: 10px; color: var(--accent); text-align: center; margin-top: 4px; min-height: 14px; }
     /* POI filter chips */
     .poi-chip-row { display: flex; gap: 6px; margin-bottom: 8px; }
     .poi-chip {
@@ -460,6 +481,31 @@
           <p style="font-size:12px;color:var(--text3);margin-bottom:10px">
             Drag the numbered day-end markers on the map, or use the sliders below each day, to shift where each day ends.
           </p>
+          <!-- Skeleton elevation profile -->
+          <button class="elev-toggle" onclick="toggleSkeletonElevProfile()">
+            ▲ Elevation profile <span id="skel-elev-chevron">▾</span>
+          </button>
+          <div id="skel-elev-panel" class="elev-panel" style="display:none">
+            <svg id="skel-elev-svg" class="elev-svg" height="70" viewBox="0 0 300 70"
+              onmousemove="onSkelElevMove(event)" onmouseleave="onElevLeave()">
+              <defs>
+                <linearGradient id="skel-elev-grad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.05"/>
+                </linearGradient>
+              </defs>
+              <path id="skel-elev-path" d="" fill="url(#skel-elev-grad)" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+            <div id="skel-elev-scrubber" class="elev-scrubber" style="display:none;left:0"></div>
+            <div class="elev-stats">
+              <div class="elev-stat">↑ <span id="sep-ascent">…</span></div>
+              <div class="elev-stat">↓ <span id="sep-descent">…</span></div>
+              <div class="elev-stat">Max <span id="sep-max">…</span></div>
+              <div class="elev-stat">Min <span id="sep-min">…</span></div>
+            </div>
+            <div class="elev-coord" id="sep-coord"></div>
+          </div>
+
           <button class="btn btn-outline btn-sm" onclick="goBack()" style="width:100%;margin-bottom:8px">‹ Change start / finish</button>
           <button class="btn btn-outline btn-sm" onclick="regenerate()" style="width:100%;margin-bottom:8px">↺ Regenerate candidates</button>
           <button class="btn btn-accent" onclick="confirmSkeleton()">Confirm skeleton →</button>
@@ -822,6 +868,33 @@ function bearingLabel(deg) {
 
 // ── BRouter ───────────────────────────────────────────────────────────────────
 // Returns { coordinates, pathPct } — pathPct derived from BRouter WayClass stats
+// BRouter GeoJSON messages format (matches native brouterService.ts exactly):
+//   messages[0]  = header row (ignored)
+//   messages[i]  = [lon, lat, elev, distance_of_this_segment, ..., wayTags_string]
+//   wayTags      = space-separated "key=value" pairs, e.g. "highway=footway surface=gravel"
+//   column [3]   = segment distance in metres
+//   column [9]   = wayTags string
+// Path-preferred highways (mirrors PATH_HIGHWAYS in brouterService.ts):
+const BROUTER_PATH_HIGHWAYS = new Set(['footway','path','bridleway','cycleway','pedestrian','track','steps']);
+
+function parseBRouterPathDensity(messages) {
+  if (!Array.isArray(messages) || messages.length < 2) return undefined;
+  let pathMetres = 0, totalMetres = 0;
+  for (let i = 1; i < messages.length; i++) {
+    const row = messages[i];
+    const dist = parseFloat(row[3] ?? '0');
+    if (isNaN(dist) || dist <= 0) continue;
+    totalMetres += dist;
+    const wayTags = row[9] ?? '';
+    const hwyMatch = /highway=([a-z_]+)/.exec(wayTags);
+    const isTowpath = /towpath=yes/.test(wayTags);
+    if ((hwyMatch && BROUTER_PATH_HIGHWAYS.has(hwyMatch[1])) || isTowpath) {
+      pathMetres += dist;
+    }
+  }
+  return totalMetres > 0 ? pathMetres / totalMetres : undefined;
+}
+
 async function routeBRouterFull(waypoints, profile = 'hiking-mountain') {
   const lonlats = waypoints.map(w => `${w.longitude},${w.latitude}`).join('|');
   const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson`;
@@ -834,25 +907,7 @@ async function routeBRouterFull(waypoints, profile = 'hiking-mountain') {
   const feat = gj.features?.[0];
   if (!feat) throw new Error('No route returned from routing service');
   const coordinates = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-
-  // Extract path density from BRouter messages (WayClass breakdown)
-  // messages[i] = [coord_idx, elev, dist_to_here, ascent, descent, time, wayclass, surface, ...]
-  // wayclass values: 0=motorway … 6=path/track, 7=footway, higher = off-track
-  let pathDist = 0, totalMsgDist = 0;
-  const messages = feat.properties?.messages;
-  if (Array.isArray(messages) && messages.length > 1) {
-    for (let i = 1; i < messages.length; i++) {
-      const seg = messages[i];
-      const dist = parseFloat(seg[2]) - parseFloat(messages[i-1][2]);
-      const wayclass = parseInt(seg[6]);
-      if (!isNaN(dist)) {
-        totalMsgDist += dist;
-        // wayclass 4=track/bridleway, 5=cycleway/path, 6=footpath, 7=steps, 8=ferry
-        if (wayclass >= 4 && wayclass <= 7) pathDist += dist;
-      }
-    }
-  }
-  const pathPct = totalMsgDist > 0 ? pathDist / totalMsgDist : 0.5;
+  const pathPct = parseBRouterPathDensity(feat.properties?.messages);
   return { coordinates, pathPct };
 }
 
@@ -1047,11 +1102,17 @@ function applyCandidate(idx) {
   trip.skeleton = candidates[idx].skeleton;
   trip.stage = 'skeleton';
   trip.updatedAt = new Date().toISOString();
+  // Reset skeleton elev profile — new candidate, old data stale
+  skelElevData = null;
+  const skelPanel = document.getElementById('skel-elev-panel');
+  if (skelPanel) skelPanel.style.display = 'none';
+  skelElevVisible = false;
+  const skelChev = document.getElementById('skel-elev-chevron');
+  if (skelChev) skelChev.textContent = '▾';
   renderOnMap();
   placeDayEndMarkers();
   renderDayList();
   updateSkeletonStats();
-  // Re-fetch elevation for the newly active candidate (fire-and-forget)
   document.getElementById('stat-ascent').textContent = '…';
   fetchElevationStats(trip.skeleton.coordinates).then(elev => {
     document.getElementById('stat-ascent').textContent = elev ? `${elev.ascentMetres}m` : '?';
@@ -2101,6 +2162,7 @@ async function renderDayPicker(dayIdx) {
   waypointMode = false;
   clearDayPickerMapLayers();
   clearPoiMarkers();
+  resetElevProfile();
   poiData = { water: [], shop: [], landmark: [] };
   poiVisible = { water: false, shop: false, landmark: false };
 
@@ -2149,7 +2211,7 @@ function renderDayPickerBody(alts, dayIdx) {
     const color = FLAVOUR_COLORS[flavour];
     const feel = alt.feel || '';
     const surface = alt.surface || '';
-    const pathPct = alt.pathPct !== undefined ? Math.round(alt.pathPct * 100) : null;
+    const pathPct = alt.pathPct != null ? Math.round(alt.pathPct * 100) : null;
     const ascentM = alt.ascentM || null;
     html += `<div class="alt-card${selected ? ' selected' : ''}" id="altcard-${flavour}"
         style="--alt-color:${color}" onclick="selectAlt('${flavour}')">
@@ -2167,18 +2229,46 @@ function renderDayPickerBody(alts, dayIdx) {
           <div class="alt-stat-val">${Math.round(alt.distanceMetres/1000/WALK_SPEED_KMH*60)}</div>
           <div class="alt-stat-lbl">min</div>
         </div>
-        ${pathPct !== null ? `<div class="alt-stat">
-          <div class="alt-stat-val">${pathPct}%</div>
+        <div class="alt-stat">
+          <div class="alt-stat-val">${pathPct !== null ? pathPct + '%' : '—'}</div>
           <div class="alt-stat-lbl">paths</div>
-        </div>` : ''}
-        ${ascentM ? `<div class="alt-stat">
+        </div>
+        ${ascentM ? `<div class="alt-stat" data-stat="ascent">
           <div class="alt-stat-val">${ascentM}m</div>
           <div class="alt-stat-lbl">↑</div>
-        </div>` : ''}
+        </div>` : `<div class="alt-stat" data-stat="ascent">
+          <div class="alt-stat-val">…</div>
+          <div class="alt-stat-lbl">↑</div>
+        </div>`}
       </div>
       ${surface ? `<div class="alt-surface">${surface}</div>` : ''}
     </div>`;
   }
+
+  // Elevation profile (collapsed by default, expands on toggle)
+  html += `<button class="elev-toggle" onclick="toggleElevProfile()">
+    ▲ Elevation profile <span id="elev-toggle-chevron">▾</span>
+  </button>
+  <div id="elev-panel" class="elev-panel" style="display:none">
+    <svg id="elev-svg" class="elev-svg" height="70" viewBox="0 0 300 70"
+      onmousemove="onElevMove(event)" onmouseleave="onElevLeave()">
+      <defs>
+        <linearGradient id="elev-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.5"/>
+          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.05"/>
+        </linearGradient>
+      </defs>
+      <path id="elev-path" d="" fill="url(#elev-grad)" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+    <div id="elev-scrubber" class="elev-scrubber" style="display:none;left:0"></div>
+    <div class="elev-stats">
+      <div class="elev-stat">↑ <span id="ep-ascent">…</span></div>
+      <div class="elev-stat">↓ <span id="ep-descent">…</span></div>
+      <div class="elev-stat">Max <span id="ep-max">…</span></div>
+      <div class="elev-stat">Min <span id="ep-min">…</span></div>
+    </div>
+    <div class="elev-coord" id="ep-coord"></div>
+  </div>`;
 
   // POI chips row
   html += `<div class="poi-chip-row" id="poi-chips">
@@ -2228,55 +2318,69 @@ function renderDayPickerBody(alts, dayIdx) {
 async function generateDayAlts(start, end, dayIdx) {
   const results = {};
 
-  // Direct: BRouter hiking-mountain — general walking, follows actual hiking paths
-  let directCoords = null, directPathPct = 0.5;
+  // Direct: BRouter hiking-mountain — general walking.
+  // pathPct left as undefined (shown as "—") to match native tripDayRouter.ts which also
+  // sets pathDensity:0 for BRouter direct routes (BRouter doesn't expose OSM way tags
+  // in a format the native graph model can use for path scoring).
+  let directCoords = null;
   try {
     const r = await routeBRouterFull([start, end], 'hiking-mountain');
     directCoords = r.coordinates;
-    directPathPct = r.pathPct;
     if (directCoords && directCoords.length >= 2) {
       results.direct = {
         coordinates: directCoords,
         distanceMetres: totalDist(directCoords),
-        pathPct: directPathPct,
+        pathPct: r.pathPct,   // real value from messages[i][9] highway= parsing
         feel: calcFeel(totalDist(directCoords), null),
-        surface: surfaceLabel(directPathPct),
+        surface: r.pathPct != null ? surfaceLabel(r.pathPct) : 'mixed',
       };
     }
   } catch (e) { console.warn('[dayAlts] direct failed', e.message); }
 
-  // Paths: BRouter trekking profile — strongly prefers footways, paths, bridleways
-  let pathsCoords = null, pathsPathPct = 0.8;
+  // Paths: BRouter with 'hiking-mountain' but adding noBike=true to prefer
+  // footways. Since public BRouter only has a few profiles, we use the same
+  // profile but add alternativeidx=1 (BRouter's second alternative is often
+  // a more path-heavy route). Fallback: just use the same direct route with
+  // a different via point to diversify.
+  let pathsCoords = null, pathsPathPct = undefined;
   try {
-    const r = await routeBRouterFull([start, end], 'trekking');
-    pathsCoords = r.coordinates;
-    pathsPathPct = r.pathPct;
-    if (pathsCoords && pathsCoords.length >= 2) {
-      // Only add if route is meaningfully different (>15% dist difference OR low spatial overlap)
-      const distDiff = directCoords ? Math.abs(totalDist(pathsCoords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
-      const isDup = directCoords && distDiff < 0.05 && routeSimilarity(directCoords, pathsCoords) > 0.9;
-      if (!isDup) {
-        results.paths = {
-          coordinates: pathsCoords,
-          distanceMetres: totalDist(pathsCoords),
-          pathPct: pathsPathPct,
-          feel: calcFeel(totalDist(pathsCoords), null),
-          surface: surfaceLabel(pathsPathPct),
-        };
+    // BRouter alternativeidx=1 requests BRouter's second best route, which
+    // is typically more off-road than alternativeidx=0.
+    const lonlats = [start, end].map(w => `${w.longitude},${w.latitude}`).join('|');
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=1&format=geojson`;
+    const resp = await fetch(url);
+    if (resp.ok) {
+      const gj = await resp.json();
+      const feat = gj.features?.[0];
+      if (feat) {
+        const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+        const pp = parseBRouterPathDensity(feat.properties?.messages);
+        const distDiff = directCoords ? Math.abs(totalDist(coords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
+        const isDup = directCoords && distDiff < 0.04 && routeSimilarity(directCoords, coords) > 0.88;
+        if (!isDup && coords.length >= 2) {
+          pathsCoords = coords; pathsPathPct = pp;
+          results.paths = {
+            coordinates: pathsCoords,
+            distanceMetres: totalDist(pathsCoords),
+            pathPct: pathsPathPct,
+            feel: calcFeel(totalDist(pathsCoords), null),
+            surface: pathsPathPct != null ? surfaceLabel(pathsPathPct) : 'mixed',
+          };
+        }
       }
     }
   } catch (e) { console.warn('[dayAlts] paths failed', e.message); }
 
-  // Scenic: route via a perpendicular midpoint offset using hiking-mountain
+  // Scenic: route via a perpendicular midpoint offset — forces a geographical detour
   try {
     for (const side of [1, -1]) {
       const via = perpendicularMidpoint(start, end, DETOUR_FRACTION, side);
       const r = await routeBRouterFull([start, via, end], 'hiking-mountain');
       const scenicCoords = r.coordinates;
       if (!scenicCoords || scenicCoords.length < 2) continue;
-      // Must be meaningfully different: distance >8% longer than direct, or low spatial overlap
+      // Accept if it's geographically distinct from direct and paths
       const distDiff = directCoords ? (totalDist(scenicCoords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
-      const dup1 = directCoords && distDiff < 0.08 && routeSimilarity(directCoords, scenicCoords) > 0.85;
+      const dup1 = directCoords && distDiff < 0.06 && routeSimilarity(directCoords, scenicCoords) > 0.85;
       const dup2 = pathsCoords && routeSimilarity(pathsCoords, scenicCoords) > 0.85;
       if (dup1 || dup2) continue;
       results.scenic = {
@@ -2284,7 +2388,7 @@ async function generateDayAlts(start, end, dayIdx) {
         distanceMetres: totalDist(scenicCoords),
         pathPct: r.pathPct,
         feel: calcFeel(totalDist(scenicCoords), null),
-        surface: surfaceLabel(r.pathPct),
+        surface: r.pathPct != null ? surfaceLabel(r.pathPct) : 'mixed',
       };
       break;
     }
@@ -2456,6 +2560,14 @@ function selectAlt(flavour) {
   }
   // Update map
   showDayAltOnMap(currentDayAlts, flavour, currentDayIdx);
+  // Reset elevation profile — new route, old data is stale
+  resetElevProfile();
+  if (elevProfileVisible) {
+    // Was open — reload immediately for new alt
+    const panel = document.getElementById('elev-panel');
+    if (panel) panel.style.display = 'block';
+    loadElevProfile(currentDayAlts[flavour].coordinates);
+  }
 }
 
 // ── POI overlays ──────────────────────────────────────────────────────────────
@@ -2771,6 +2883,242 @@ async function pickDay(dayIdx) {
   }
 }
 
+// ── Elevation profile ─────────────────────────────────────────────────────────
+let elevProfileData = null;   // { samples: [{elev, coord}], ascentM, descentM, maxE, minE }
+let elevProfileVisible = false;
+let elevScrubMarker = null;   // MapLibre marker for the scrub position
+
+let skelElevData = null;
+let skelElevVisible = false;
+
+function toggleSkeletonElevProfile() {
+  skelElevVisible = !skelElevVisible;
+  const panel = document.getElementById('skel-elev-panel');
+  const chev  = document.getElementById('skel-elev-chevron');
+  if (panel) panel.style.display = skelElevVisible ? 'block' : 'none';
+  if (chev)  chev.textContent = skelElevVisible ? '▴' : '▾';
+  if (skelElevVisible && !skelElevData && trip.skeleton) {
+    loadSkelElevProfile(trip.skeleton.coordinates);
+  }
+}
+
+async function loadSkelElevProfile(coords) {
+  if (!coords || coords.length < 2) return;
+  const step = Math.max(1, Math.floor(coords.length / 150));
+  const sampled = coords.filter((_, i) => i % step === 0);
+  if (sampled[sampled.length - 1] !== coords[coords.length - 1]) sampled.push(coords[coords.length - 1]);
+  document.getElementById('sep-ascent').textContent = '…';
+  try {
+    const r = await fetch(OPEN_ELEVATION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locations: sampled.map(c => ({ latitude: c.latitude, longitude: c.longitude })) }),
+    });
+    if (!r.ok) throw new Error('unavailable');
+    const data = await r.json();
+    const results = data.results ?? [];
+    if (results.length < 2) throw new Error('insufficient');
+    let ascentM = 0, descentM = 0;
+    for (let i = 1; i < results.length; i++) {
+      const diff = results[i].elevation - results[i-1].elevation;
+      if (diff > 0) ascentM += diff; else descentM += Math.abs(diff);
+    }
+    const elevs = results.map(p => p.elevation);
+    const maxE = Math.max(...elevs), minE = Math.min(...elevs);
+    skelElevData = { samples: results.map((p,i) => ({ elev: p.elevation, coord: sampled[i] })), maxE, minE };
+    drawSkelElevProfile();
+    document.getElementById('sep-ascent').textContent  = `${Math.round(ascentM)}m`;
+    document.getElementById('sep-descent').textContent = `${Math.round(descentM)}m`;
+    document.getElementById('sep-max').textContent     = `${Math.round(maxE)}m`;
+    document.getElementById('sep-min').textContent     = `${Math.round(minE)}m`;
+    // Also update the main stat row ascent
+    document.getElementById('stat-ascent').textContent = `${Math.round(ascentM)}m`;
+  } catch { document.getElementById('sep-ascent').textContent = 'N/A'; }
+}
+
+function drawSkelElevProfile() {
+  if (!skelElevData) return;
+  const svg = document.getElementById('skel-elev-svg');
+  const path = document.getElementById('skel-elev-path');
+  if (!svg || !path) return;
+  const W = 300, H = 70, pad = 6;
+  const { samples, maxE, minE } = skelElevData;
+  const range = maxE - minE || 1;
+  const pts = samples.map((s, i) => {
+    const x = pad + (i / (samples.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((s.elev - minE) / range) * (H - pad * 2);
+    return [x, y];
+  });
+  const d = `M${pts[0][0]},${pts[0][1]}` +
+    pts.slice(1).map(p => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('') +
+    `L${pts[pts.length-1][0]},${H}L${pts[0][0]},${H}Z`;
+  path.setAttribute('d', d);
+  svg._pts = pts; svg._samples = samples; svg._W = W;
+}
+
+function onSkelElevMove(e) {
+  if (!skelElevData) return;
+  const svg = document.getElementById('skel-elev-svg');
+  if (!svg || !svg._pts) return;
+  const rect = svg.getBoundingClientRect();
+  const relX = (e.clientX - rect.left) / rect.width;
+  const W = 300, pad = 6;
+  const svgX = pad + relX * (W - pad * 2);
+  const pts = svg._pts;
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const d = Math.abs(pts[i][0] - svgX);
+    if (d < bd) { bd = d; best = i; }
+  }
+  const sample = svg._samples[best];
+  const scrubber = document.getElementById('skel-elev-scrubber');
+  const panelRect = document.getElementById('skel-elev-panel').getBoundingClientRect();
+  const svgRect = svg.getBoundingClientRect();
+  if (scrubber) {
+    const leftPx = (pts[best][0] / W) * svgRect.width + (svgRect.left - panelRect.left) - 1;
+    scrubber.style.left = `${leftPx}px`;
+    scrubber.style.display = 'block';
+  }
+  const coord = document.getElementById('sep-coord');
+  if (coord) coord.textContent = `${sample.elev}m · ${sample.coord.latitude.toFixed(5)}, ${sample.coord.longitude.toFixed(5)}`;
+  if (!elevScrubMarker) {
+    const el = document.createElement('div');
+    el.style.cssText = 'width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5)';
+    elevScrubMarker = new maplibregl.Marker({ element: el }).addTo(map);
+  }
+  elevScrubMarker.setLngLat([sample.coord.longitude, sample.coord.latitude]);
+}
+
+function toggleElevProfile() {
+  elevProfileVisible = !elevProfileVisible;
+  const panel = document.getElementById('elev-panel');
+  const chev  = document.getElementById('elev-toggle-chevron');
+  if (panel) panel.style.display = elevProfileVisible ? 'block' : 'none';
+  if (chev)  chev.textContent = elevProfileVisible ? '▴' : '▾';
+  if (elevProfileVisible && !elevProfileData && currentDayAlts?.[pickedFlavour]) {
+    loadElevProfile(currentDayAlts[pickedFlavour].coordinates);
+  }
+}
+
+async function loadElevProfile(coords) {
+  if (!coords || coords.length < 2) return;
+  // Use Open-Elevation — same API as skeleton stats
+  const step = Math.max(1, Math.floor(coords.length / 150));
+  const sampled = coords.filter((_, i) => i % step === 0);
+  // Ensure last point is included
+  if (sampled[sampled.length - 1] !== coords[coords.length - 1]) sampled.push(coords[coords.length - 1]);
+
+  document.getElementById('ep-ascent').textContent = '…';
+  try {
+    const r = await fetch(OPEN_ELEVATION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locations: sampled.map(c => ({ latitude: c.latitude, longitude: c.longitude })) }),
+    });
+    if (!r.ok) throw new Error('elevation unavailable');
+    const data = await r.json();
+    const results = data.results ?? [];
+    if (results.length < 2) throw new Error('insufficient data');
+
+    let ascentM = 0, descentM = 0;
+    for (let i = 1; i < results.length; i++) {
+      const diff = results[i].elevation - results[i-1].elevation;
+      if (diff > 0) ascentM += diff; else descentM += Math.abs(diff);
+    }
+    const elevs = results.map(p => p.elevation);
+    const maxE = Math.max(...elevs), minE = Math.min(...elevs);
+    elevProfileData = {
+      samples: results.map((p, i) => ({ elev: p.elevation, coord: sampled[i] })),
+      ascentM: Math.round(ascentM),
+      descentM: Math.round(descentM),
+      maxE, minE,
+    };
+    drawElevProfile();
+    document.getElementById('ep-ascent').textContent  = `${Math.round(ascentM)}m`;
+    document.getElementById('ep-descent').textContent = `${Math.round(descentM)}m`;
+    document.getElementById('ep-max').textContent     = `${Math.round(maxE)}m`;
+    document.getElementById('ep-min').textContent     = `${Math.round(minE)}m`;
+  } catch {
+    document.getElementById('ep-ascent').textContent = 'N/A';
+  }
+}
+
+function drawElevProfile() {
+  if (!elevProfileData) return;
+  const svg = document.getElementById('elev-svg');
+  const path = document.getElementById('elev-path');
+  if (!svg || !path) return;
+  const W = 300, H = 70, pad = 6;
+  const { samples, maxE, minE } = elevProfileData;
+  const range = maxE - minE || 1;
+  const pts = samples.map((s, i) => {
+    const x = pad + (i / (samples.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((s.elev - minE) / range) * (H - pad * 2);
+    return [x, y];
+  });
+  // SVG path: M to first, L to rest, close to bottom
+  const d = `M${pts[0][0]},${pts[0][1]}` +
+    pts.slice(1).map(p => `L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('') +
+    `L${pts[pts.length-1][0]},${H}L${pts[0][0]},${H}Z`;
+  path.setAttribute('d', d);
+  // Store pts for scrubber hit-testing
+  svg._pts = pts;
+  svg._samples = samples;
+  svg._W = W;
+}
+
+function onElevMove(e) {
+  if (!elevProfileData) return;
+  const svg = document.getElementById('elev-svg');
+  if (!svg || !svg._pts) return;
+  const rect = svg.getBoundingClientRect();
+  const relX = (e.clientX - rect.left) / rect.width;  // 0-1
+  const W = 300, pad = 6;
+  const svgX = pad + relX * (W - pad * 2);
+  // Find nearest sample by x-position
+  const pts = svg._pts;
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const d = Math.abs(pts[i][0] - svgX);
+    if (d < bd) { bd = d; best = i; }
+  }
+  const sample = svg._samples[best];
+  // Move scrubber line
+  const scrubber = document.getElementById('elev-scrubber');
+  const panelRect = document.getElementById('elev-panel').getBoundingClientRect();
+  const svgRect = svg.getBoundingClientRect();
+  if (scrubber) {
+    const leftPx = (pts[best][0] / W) * svgRect.width + (svgRect.left - panelRect.left) - 1;
+    scrubber.style.left = `${leftPx}px`;
+    scrubber.style.display = 'block';
+  }
+  // Show coord label
+  const coord = document.getElementById('ep-coord');
+  if (coord) coord.textContent = `${sample.elev}m · ${sample.coord.latitude.toFixed(5)}, ${sample.coord.longitude.toFixed(5)}`;
+  // Move map scrub marker
+  if (!elevScrubMarker) {
+    const el = document.createElement('div');
+    el.style.cssText = 'width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5)';
+    elevScrubMarker = new maplibregl.Marker({ element: el }).addTo(map);
+  }
+  elevScrubMarker.setLngLat([sample.coord.longitude, sample.coord.latitude]);
+}
+
+function onElevLeave() {
+  const scrubber = document.getElementById('elev-scrubber');
+  if (scrubber) scrubber.style.display = 'none';
+  const coord = document.getElementById('ep-coord');
+  if (coord) coord.textContent = '';
+  if (elevScrubMarker) { elevScrubMarker.remove(); elevScrubMarker = null; }
+}
+
+// Reset elevation profile when moving to a different day or alt
+function resetElevProfile() {
+  elevProfileData = null;
+  elevProfileVisible = false;
+  onElevLeave();
+}
+
 // ── Map click routing for waypoints ──────────────────────────────────────────
 // (Extends the existing map.on('click') handler — we check waypointMode)
 
@@ -2806,6 +3154,7 @@ function newTrip() {
   Object.keys(sleepMarkers).forEach(k => delete sleepMarkers[k]);
   dayRoutes = []; dayAlts = [];
   currentDayIdx = 0; pickedFlavour = null;
+  resetElevProfile();
   clearCustomWaypoints();
   clearPoiMarkers();
   poiData = { water: [], shop: [], landmark: [] };
