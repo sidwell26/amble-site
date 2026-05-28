@@ -821,10 +821,10 @@ function bearingLabel(deg) {
 }
 
 // ── BRouter ───────────────────────────────────────────────────────────────────
-async function routeBRouter(waypoints) {
-  // waypoints: [{latitude, longitude}, ...]
+// Returns { coordinates, pathPct } — pathPct derived from BRouter WayClass stats
+async function routeBRouterFull(waypoints, profile = 'hiking-mountain') {
   const lonlats = waypoints.map(w => `${w.longitude},${w.latitude}`).join('|');
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson`;
   const r = await fetch(url);
   if (!r.ok) {
     const text = await r.text().catch(() => '');
@@ -833,8 +833,32 @@ async function routeBRouter(waypoints) {
   const gj = await r.json();
   const feat = gj.features?.[0];
   if (!feat) throw new Error('No route returned from routing service');
-  const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-  return coords;
+  const coordinates = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+
+  // Extract path density from BRouter messages (WayClass breakdown)
+  // messages[i] = [coord_idx, elev, dist_to_here, ascent, descent, time, wayclass, surface, ...]
+  // wayclass values: 0=motorway … 6=path/track, 7=footway, higher = off-track
+  let pathDist = 0, totalMsgDist = 0;
+  const messages = feat.properties?.messages;
+  if (Array.isArray(messages) && messages.length > 1) {
+    for (let i = 1; i < messages.length; i++) {
+      const seg = messages[i];
+      const dist = parseFloat(seg[2]) - parseFloat(messages[i-1][2]);
+      const wayclass = parseInt(seg[6]);
+      if (!isNaN(dist)) {
+        totalMsgDist += dist;
+        // wayclass 4=track/bridleway, 5=cycleway/path, 6=footpath, 7=steps, 8=ferry
+        if (wayclass >= 4 && wayclass <= 7) pathDist += dist;
+      }
+    }
+  }
+  const pathPct = totalMsgDist > 0 ? pathDist / totalMsgDist : 0.5;
+  return { coordinates, pathPct };
+}
+
+async function routeBRouter(waypoints) {
+  const { coordinates } = await routeBRouterFull(waypoints);
+  return coordinates;
 }
 
 // Route a loop via an intermediate midpoint so BRouter doesn't return trivial zero-route
@@ -916,10 +940,11 @@ async function planSkeletonCandidates(start, finish, isLoop, targetDayCount, tar
 
   if (results.length === 0) throw new Error('Could not generate any skeleton candidates');
 
-  // Deduplicate candidates that are nearly identical (same distance within 5%)
+  // Deduplicate candidates by spatial overlap (not distance) — two loops at different
+  // compass bearings can have the same length but completely different paths.
   const deduped = [];
   for (const r of results) {
-    const dup = deduped.find(d => Math.abs(d.dist - r.dist) / r.dist < 0.05);
+    const dup = deduped.find(d => routeSimilarity(d.coords, r.coords) > 0.7);
     if (!dup) deduped.push(r);
   }
 
@@ -966,10 +991,14 @@ async function generateSkeleton() {
       }
     });
 
-    // Greenery scoring via Overpass (async, updates pill labels when done)
+    // Greenery scoring via Overpass (async, re-sorts candidates + updates labels)
     if (candidates.length > 1) {
+      const activeSkeleton = candidates[activeCandidateIdx]?.skeleton;
       scoreAllCandidates(candidates).then(() => {
-        // Update trip.skeletonCandidates with scored fractions
+        // After sort, find the active candidate by skeleton identity
+        const newActiveIdx = candidates.findIndex(c => c.skeleton === activeSkeleton);
+        if (newActiveIdx !== -1) activeCandidateIdx = newActiveIdx;
+        // Update trip.skeletonCandidates with scored fractions + new order
         trip.skeletonCandidates = candidates.map(c => ({
           skeleton: c.skeleton,
           dayEnds: c.skeleton.dayEnds.map(de => c.skeleton.coordinates[de.index]),
@@ -1970,20 +1999,49 @@ function pickSleepByIdx(dayIdx, poiIdx) {
   if (poi) pickSleep(dayIdx, poi);
 }
 
+// Sleep markers live here (emoji pins separate from numbered day-end pins)
+const sleepMarkers = {}; // dayIdx → MapLibre Marker
+
 function pickSleep(dayIdx, poi) {
-  const dayEnd = trip.skeleton.dayEnds[dayIdx];
-  const coord = dayEnd.kind === 'pinned' ? dayEnd.coord : trip.skeleton.coordinates[dayEnd.index];
+  // Remove any existing sleep marker for this night
+  if (sleepMarkers[dayIdx]) { sleepMarkers[dayIdx].remove(); delete sleepMarkers[dayIdx]; }
+
+  const prevDayEnd = trip.skeleton.dayEnds[dayIdx];
+  const coord = prevDayEnd.kind === 'pinned' ? prevDayEnd.coord : trip.skeleton.coordinates[prevDayEnd.index];
+
   if (poi === 'skip') {
     sleepPicks[dayIdx] = 'skip';
-    // Ensure day-end remains a 'cut' (not pinned to poi)
+    // Revert to original cut position if it was previously pinned by us
+    if (prevDayEnd.kind === 'pinned') {
+      // Find nearest skeleton index
+      const idx = nearestIdx(trip.skeleton.coordinates, coord.latitude, coord.longitude);
+      trip.skeleton.dayEnds[dayIdx] = { kind: 'cut', index: idx };
+      if (dayEndMarkers[dayIdx]) {
+        const c = trip.skeleton.coordinates[idx];
+        dayEndMarkers[dayIdx].setLngLat([c.longitude, c.latitude]);
+      }
+    }
   } else {
     sleepPicks[dayIdx] = poi;
-    // Pin the day-end to the accommodation coord
+    // Pin the skeleton day-end to the accommodation coord
     trip.skeleton.dayEnds[dayIdx] = { kind: 'pinned', coord: poi.coord, label: poi.name, poiKind: 'camp' };
     trip.updatedAt = new Date().toISOString();
-    // Update map marker
-    if (dayEndMarkers[dayIdx]) dayEndMarkers[dayIdx].setLngLat([poi.coord.longitude, poi.coord.latitude]);
+    // Move the numbered day-end marker to the accommodation
+    if (dayEndMarkers[dayIdx]) {
+      dayEndMarkers[dayIdx].setLngLat([poi.coord.longitude, poi.coord.latitude]);
+    }
+    // Place an emoji accommodation marker on the map
+    const el = document.createElement('div');
+    el.style.cssText = 'font-size:24px;cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));line-height:1';
+    el.textContent = poi.emoji || '🏨';
+    el.title = poi.name;
+    const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+      .setLngLat([poi.coord.longitude, poi.coord.latitude]).addTo(map);
+    sleepMarkers[dayIdx] = m;
+    // Pan map to show it
+    map.panTo([poi.coord.longitude, poi.coord.latitude], { duration: 600 });
   }
+
   renderSleepNight(dayIdx, coord);
 }
 
@@ -2162,59 +2220,71 @@ function renderDayPickerBody(alts, dayIdx) {
 }
 
 // ── 3-flavour route generation ────────────────────────────────────────────────
+// BRouter profiles available on brouter.de:
+//   hiking-mountain — mountain hiking (default, general purpose)
+//   trekking        — long-distance trekking, strongly prefers footways/tracks
+//   safety          — safest / most road-like
+
 async function generateDayAlts(start, end, dayIdx) {
   const results = {};
 
-  // Direct: BRouter start → end
-  let directCoords = null;
+  // Direct: BRouter hiking-mountain — general walking, follows actual hiking paths
+  let directCoords = null, directPathPct = 0.5;
   try {
-    directCoords = await routeBRouter([start, end]);
+    const r = await routeBRouterFull([start, end], 'hiking-mountain');
+    directCoords = r.coordinates;
+    directPathPct = r.pathPct;
     if (directCoords && directCoords.length >= 2) {
       results.direct = {
         coordinates: directCoords,
         distanceMetres: totalDist(directCoords),
-        pathPct: 0.5,    // BRouter hiking-mountain is mostly paths
+        pathPct: directPathPct,
         feel: calcFeel(totalDist(directCoords), null),
-        surface: 'mixed',
+        surface: surfaceLabel(directPathPct),
       };
     }
   } catch (e) { console.warn('[dayAlts] direct failed', e.message); }
 
-  // Paths: try hiking-hiking profile (stick to paths)
-  let pathsCoords = null;
+  // Paths: BRouter trekking profile — strongly prefers footways, paths, bridleways
+  let pathsCoords = null, pathsPathPct = 0.8;
   try {
-    pathsCoords = await routeBRouterProfile([start, end], 'hiking-hiking');
+    const r = await routeBRouterFull([start, end], 'trekking');
+    pathsCoords = r.coordinates;
+    pathsPathPct = r.pathPct;
     if (pathsCoords && pathsCoords.length >= 2) {
-      // Only keep if meaningfully different from direct (>50m average deviation)
-      const isDup = directCoords && routeSimilarity(directCoords, pathsCoords) > 0.85;
+      // Only add if route is meaningfully different (>15% dist difference OR low spatial overlap)
+      const distDiff = directCoords ? Math.abs(totalDist(pathsCoords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
+      const isDup = directCoords && distDiff < 0.05 && routeSimilarity(directCoords, pathsCoords) > 0.9;
       if (!isDup) {
         results.paths = {
           coordinates: pathsCoords,
           distanceMetres: totalDist(pathsCoords),
-          pathPct: 0.8,
+          pathPct: pathsPathPct,
           feel: calcFeel(totalDist(pathsCoords), null),
-          surface: 'mostly-paths',
+          surface: surfaceLabel(pathsPathPct),
         };
       }
     }
   } catch (e) { console.warn('[dayAlts] paths failed', e.message); }
 
-  // Scenic: route via a perpendicular midpoint offset
+  // Scenic: route via a perpendicular midpoint offset using hiking-mountain
   try {
     for (const side of [1, -1]) {
       const via = perpendicularMidpoint(start, end, DETOUR_FRACTION, side);
-      const scenicCoords = await routeBRouter([start, via, end]);
+      const r = await routeBRouterFull([start, via, end], 'hiking-mountain');
+      const scenicCoords = r.coordinates;
       if (!scenicCoords || scenicCoords.length < 2) continue;
-      // Must be meaningfully different from existing alts
-      const dup1 = directCoords && routeSimilarity(directCoords, scenicCoords) > 0.8;
-      const dup2 = pathsCoords && routeSimilarity(pathsCoords, scenicCoords) > 0.8;
+      // Must be meaningfully different: distance >8% longer than direct, or low spatial overlap
+      const distDiff = directCoords ? (totalDist(scenicCoords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
+      const dup1 = directCoords && distDiff < 0.08 && routeSimilarity(directCoords, scenicCoords) > 0.85;
+      const dup2 = pathsCoords && routeSimilarity(pathsCoords, scenicCoords) > 0.85;
       if (dup1 || dup2) continue;
       results.scenic = {
         coordinates: scenicCoords,
         distanceMetres: totalDist(scenicCoords),
-        pathPct: 0.65,
+        pathPct: r.pathPct,
         feel: calcFeel(totalDist(scenicCoords), null),
-        surface: 'mixed',
+        surface: surfaceLabel(r.pathPct),
       };
       break;
     }
@@ -2222,25 +2292,33 @@ async function generateDayAlts(start, end, dayIdx) {
 
   // Must have at least one alt
   if (Object.keys(results).length === 0) {
-    // Last resort: use skeleton segment as-is
     const b = getB();
     const coords = trip.skeleton.coordinates.slice(b[dayIdx], b[dayIdx + 1] + 1);
     results.direct = { coordinates: coords, distanceMetres: totalDist(coords), pathPct: 0.5, feel: 'easy', surface: 'mixed' };
   }
 
-  // Fetch elevation for each alt (fire-and-forget, updates feel/ascent when ready)
+  // Elevation: fire-and-forget, updates cards when ready
   for (const [flavour, alt] of Object.entries(results)) {
     fetchElevationStats(alt.coordinates).then(elev => {
       if (!elev) return;
       alt.ascentM = elev.ascentMetres;
       alt.feel = calcFeel(alt.distanceMetres, elev.ascentMetres);
-      // Re-render the specific card if still on this day
       if (currentDayIdx === dayIdx) {
+        // Patch the card in-place without full re-render (avoids losing chip/wp state)
         const card = document.getElementById(`altcard-${flavour}`);
         if (card) {
-          const ascentStat = card.querySelector('.alt-stat:last-child .alt-stat-lbl');
-          if (ascentStat && ascentStat.textContent === '↑') {
-            card.querySelector('.alt-stat:last-child .alt-stat-val').textContent = `${elev.ascentMetres}m`;
+          const feelBadge = card.querySelector('.alt-feel-badge');
+          if (feelBadge) feelBadge.textContent = alt.feel;
+          // Add/update ascent stat
+          let ascentCell = card.querySelector('[data-stat="ascent"]');
+          if (!ascentCell) {
+            ascentCell = document.createElement('div');
+            ascentCell.className = 'alt-stat';
+            ascentCell.setAttribute('data-stat', 'ascent');
+            ascentCell.innerHTML = `<div class="alt-stat-val">${elev.ascentMetres}m</div><div class="alt-stat-lbl">↑</div>`;
+            card.querySelector('.alt-stats')?.appendChild(ascentCell);
+          } else {
+            ascentCell.querySelector('.alt-stat-val').textContent = `${elev.ascentMetres}m`;
           }
         }
       }
@@ -2250,15 +2328,15 @@ async function generateDayAlts(start, end, dayIdx) {
   return results;
 }
 
+function surfaceLabel(pathPct) {
+  if (pathPct >= 0.75) return 'off-road / paths';
+  if (pathPct >= 0.5)  return 'mostly paths';
+  if (pathPct >= 0.25) return 'mixed';
+  return 'mostly road';
+}
+
 async function routeBRouterProfile(waypoints, profile) {
-  const lonlats = waypoints.map(w => `${w.longitude},${w.latitude}`).join('|');
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Routing failed (${r.status})`);
-  const gj = await r.json();
-  const feat = gj.features?.[0];
-  if (!feat) throw new Error('No route');
-  return feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+  return routeBRouterFull(waypoints, profile);
 }
 
 function perpendicularMidpoint(start, end, fraction, side) {
@@ -2276,16 +2354,18 @@ function perpendicularMidpoint(start, end, fraction, side) {
 }
 
 function routeSimilarity(a, b) {
-  // Approx: check fraction of b's points within 100m of any a point
+  // Fraction of b's sampled points that fall within ~150m of any point in a.
+  // 150m ≈ 0.00135 degrees latitude.
   if (!a.length || !b.length) return 0;
-  const step = Math.max(1, Math.floor(b.length / 20));
+  const step = Math.max(1, Math.floor(b.length / 30));
   const sample = b.filter((_, i) => i % step === 0);
+  const THRESH_SQ = (0.00135) ** 2; // ~150m squared, in degrees²
   let matches = 0;
   for (const bp of sample) {
     for (const ap of a) {
-      if ((bp.latitude - ap.latitude)**2 + (bp.longitude - ap.longitude)**2 < (0.001)**2) {
-        matches++; break;
-      }
+      const dLat = bp.latitude - ap.latitude;
+      const dLon = bp.longitude - ap.longitude;
+      if (dLat * dLat + dLon * dLon < THRESH_SQ) { matches++; break; }
     }
   }
   return matches / sample.length;
@@ -2311,10 +2391,16 @@ function ensureDayAltLayers() {
     const src = `dayalt-${flavour}`;
     if (!map.getSource(src)) {
       map.addSource(src, { type: 'geojson', data: emptyGJ() });
+      // Each flavour gets its own source+layer; we control visibility via setData
+      // Selected = 5px opaque; unselected = 3px dimmed
       map.addLayer({ id: src, type: 'line', source: src,
-        paint: { 'line-color': FLAVOUR_COLORS[flavour], 'line-width': ['case',['==',['id'],0],6,4],
-                 'line-opacity': ['case',['==',['id'],0],1,0.4] },
-        layout: { 'line-cap': 'round', 'line-join': 'round' } });
+        paint: {
+          'line-color': FLAVOUR_COLORS[flavour],
+          'line-width': ['case', ['==', ['get', 'selected'], 'yes'], 5, 3],
+          'line-opacity': ['case', ['==', ['get', 'selected'], 'yes'], 1, 0.45],
+        },
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+      });
     }
   }
   dayAltLayersAdded = true;
@@ -2323,21 +2409,25 @@ function ensureDayAltLayers() {
 function showDayAltOnMap(alts, selectedFlavour, dayIdx) {
   if (!map.isStyleLoaded()) { map.once('idle', () => showDayAltOnMap(alts, selectedFlavour, dayIdx)); return; }
   ensureDayAltLayers();
-  // Hide skeleton segments, show only day alt layers
   hideSkeleton();
   for (const [flavour, alt] of Object.entries(alts)) {
     const src = map.getSource(`dayalt-${flavour}`);
     if (!src) continue;
     if (alt) {
-      src.setData({ type: 'Feature', id: flavour === selectedFlavour ? 0 : 1, properties: {},
-        geometry: { type: 'LineString', coordinates: alt.coordinates.map(c => [c.longitude, c.latitude]) } });
+      src.setData({
+        type: 'Feature',
+        properties: { selected: flavour === selectedFlavour ? 'yes' : 'no' },
+        geometry: { type: 'LineString', coordinates: alt.coordinates.map(c => [c.longitude, c.latitude]) },
+      });
     } else {
       src.setData(emptyGJ());
     }
   }
-  // Fit map to selected alt
+  // Fit map to selected alt and bring its layer to front
   const alt = alts[selectedFlavour];
   if (alt && alt.coordinates.length) fitMap(alt.coordinates);
+  // Move selected layer to top
+  try { map.moveLayer(`dayalt-${selectedFlavour}`); } catch {}
 }
 
 function hideSkeleton() {
@@ -2392,39 +2482,45 @@ const OVERPASS_POI_TAGS = {
 };
 
 async function fetchDayPois(alts, dayIdx) {
-  // Union polyline from all alts
+  // Union bbox across all generated alts for this day
   const allCoords = Object.values(alts).flatMap(a => a ? a.coordinates : []);
   if (allCoords.length < 2) return;
 
-  // Sample every ~3km for bbox
-  const step = Math.max(1, Math.floor(allCoords.length / 20));
-  const sampled = allCoords.filter((_, i) => i % step === 0);
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-  for (const c of sampled) {
+  for (const c of allCoords) {
     if (c.latitude < minLat) minLat = c.latitude;
     if (c.latitude > maxLat) maxLat = c.latitude;
     if (c.longitude < minLon) minLon = c.longitude;
     if (c.longitude > maxLon) maxLon = c.longitude;
   }
-  const pad = 0.01;
+  // 500m padding so POIs near the route edges show up
+  const pad = 0.005;
   const bbox = `${minLat-pad},${minLon-pad},${maxLat+pad},${maxLon+pad}`;
 
-  for (const kind of ['water','shop','landmark']) {
+  // Fire one query per kind in parallel
+  await Promise.allSettled(['water','shop','landmark'].map(async kind => {
     const tagFilters = OVERPASS_POI_TAGS[kind].map(t => `${t}(${bbox});`).join('\n  ');
-    const q = `[out:json][timeout:12];\n(\n  ${tagFilters}\n);\nout 30;`;
-    overpassQuery(q).then(data => {
-      if (!data) return;
-      const pois = (data.elements || []).map(e => ({
+    const q = `[out:json][timeout:15];\n(\n  ${tagFilters}\n);\nout center 50;`;
+    const data = await overpassQuery(q);
+    if (!data) return;
+    const pois = (data.elements || []).map(e => {
+      const lat = e.lat ?? e.center?.lat;
+      const lon = e.lon ?? e.center?.lon;
+      if (!lat || !lon) return null;
+      return {
         id: String(e.id), kind,
-        coord: { latitude: e.lat, longitude: e.lon },
-        name: e.tags?.name || e.tags?.['name:en'] || kind,
-      })).filter(p => p.coord.latitude);
-      poiData[kind] = pois;
-      const badge = document.getElementById(`badge-${kind}`);
-      if (badge) badge.textContent = pois.length;
-      if (poiVisible[kind] && currentDayIdx === dayIdx) showPoiMarkers(kind);
-    });
-  }
+        coord: { latitude: lat, longitude: lon },
+        name: e.tags?.name || e.tags?.['name:en'] || kind.replace('_',' '),
+      };
+    }).filter(Boolean);
+    poiData[kind] = pois;
+    // Only update UI if still on the same day
+    if (currentDayIdx !== dayIdx) return;
+    const badge = document.getElementById(`badge-${kind}`);
+    if (badge) badge.textContent = pois.length > 0 ? String(pois.length) : '0';
+    // If user already toggled this chip on, render the markers now
+    if (poiVisible[kind]) showPoiMarkers(kind);
+  }));
 }
 
 function clearPoiMarkers() {
@@ -2461,9 +2557,15 @@ function togglePoi(kind) {
     const color = POI_COLORS[kind];
     chip.style.background = poiVisible[kind] ? color : '';
     chip.style.borderColor = poiVisible[kind] ? color : '';
+    chip.style.color = poiVisible[kind] ? '#fff' : '';
   }
   if (poiVisible[kind]) {
-    showPoiMarkers(kind);
+    if (poiData[kind].length > 0) {
+      showPoiMarkers(kind);
+    } else {
+      // Data still loading — badge shows '0', markers will appear when fetchDayPois resolves
+      toast(`Loading ${kind} locations…`, '');
+    }
   } else {
     poiMarkers = poiMarkers.filter(m => { if (m._poiKind === kind) { m.remove(); return false; } return true; });
   }
@@ -2700,6 +2802,8 @@ function newTrip() {
   candidates = [];
   activeCandidateIdx = 0;
   sleepPicks = {}; sleepPois = {};
+  Object.values(sleepMarkers).forEach(m => m.remove());
+  Object.keys(sleepMarkers).forEach(k => delete sleepMarkers[k]);
   dayRoutes = []; dayAlts = [];
   currentDayIdx = 0; pickedFlavour = null;
   clearCustomWaypoints();
