@@ -16,7 +16,7 @@
     :root {
       --bg: #0a0a0a; --surface: #141414; --surface2: #1e1e1e; --border: #2a2a2a;
       --accent: #a3e635; --text: #f5f5f5; --text2: #a3a3a3; --text3: #525252;
-      --red: #ef4444;
+      --red: #ef4444; --blue: #3b82f6; --purple: #a855f7;
     }
     .app { display: flex; flex-direction: column; height: 100vh; }
     .topbar {
@@ -103,6 +103,30 @@
     .stat-box label { margin-bottom: 4px; }
     .stat-box input { padding: 4px 8px; font-size: 20px; font-weight: 800; }
     .stat-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+    /* GPX import/export */
+    .gpx-divider { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+    .gpx-divider-line { flex: 1; height: 1px; background: var(--border); }
+    .gpx-divider-text { font-size: 11px; color: var(--text3); font-weight: 600; white-space: nowrap; }
+    .btn-gpx-import {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 10px 16px; background: var(--surface2);
+      border: 1.5px dashed var(--border); border-radius: 8px; color: var(--text2);
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-gpx-import:hover { border-color: var(--accent); color: var(--accent); }
+    #gpx-file-input { display: none; }
+    .gpx-import-name {
+      font-size: 12px; color: var(--accent); margin-top: 6px; text-align: center;
+      min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .btn-gpx-export {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 10px 16px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 8px; color: var(--text2);
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: border-color 0.15s, color 0.15s;
+      margin-top: 8px;
+    }
+    .btn-gpx-export:hover { border-color: var(--accent); color: var(--accent); }
     /* Loop toggle */
     .loop-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; cursor: pointer; }
     .loop-row input { width: auto; cursor: pointer; accent-color: var(--accent); }
@@ -116,6 +140,35 @@
     .day-label { flex: 1; font-size: 13px; font-weight: 600; }
     .day-km { font-size: 13px; color: var(--text2); font-weight: 700; }
     .day-stop { font-size: 11px; color: var(--text3); margin-top: 2px; }
+    /* Slider */
+    .day-slider-row { padding: 2px 12px 8px; }
+    .day-slider {
+      -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+      border-radius: 2px; outline: none; cursor: pointer;
+    }
+    .day-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 20px; height: 20px; border-radius: 50%; cursor: grab;
+      border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+    /* Candidate cards */
+    .candidates-scroll {
+      display: flex; gap: 10px; overflow-x: auto; padding: 12px 16px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      scrollbar-width: none;
+    }
+    .candidates-scroll::-webkit-scrollbar { display: none; }
+    .candidate-pill {
+      flex-shrink: 0; min-width: 160px; padding: 10px 14px;
+      background: var(--surface2); border: 1.5px solid var(--border); border-radius: 10px;
+      cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    }
+    .candidate-pill:hover { border-color: var(--accent); }
+    .candidate-pill.active { background: var(--accent); border-color: var(--accent); }
+    .candidate-pill .cpill-label { font-size: 13px; font-weight: 700; color: var(--text); }
+    .candidate-pill.active .cpill-label { color: #0a0a0a; }
+    .candidate-pill .cpill-sub { font-size: 11px; color: var(--text3); margin-top: 3px; }
+    .candidate-pill.active .cpill-sub { color: #0a0a0a; opacity: 0.7; }
     /* Stops */
     .stop-row {
       display: flex; align-items: center; gap: 8px; padding: 8px 10px;
@@ -123,6 +176,12 @@
     }
     .stop-row-name { flex: 1; font-size: 13px; }
     .stop-row-day { font-size: 11px; color: var(--text3); }
+    /* Stats row */
+    .stats-row { display: flex; gap: 0; margin-bottom: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .stats-cell { flex: 1; padding: 10px 8px; text-align: center; border-right: 1px solid var(--border); }
+    .stats-cell:last-child { border-right: none; }
+    .stats-val { font-size: 16px; font-weight: 800; color: var(--text); }
+    .stats-lbl { font-size: 10px; font-weight: 700; color: var(--text3); letter-spacing: 0.6px; text-transform: uppercase; margin-top: 2px; }
     /* Summary card */
     .summary-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
     /* Toast */
@@ -270,21 +329,49 @@
         </div>
 
         <button class="btn btn-accent" id="gen-btn" onclick="generateSkeleton()" disabled>
-          Generate skeleton route
+          Generate route candidates
         </button>
         <div id="gen-err" style="font-size:12px;color:var(--red);margin-top:8px;min-height:16px"></div>
+
+        <div class="gpx-divider">
+          <div class="gpx-divider-line"></div>
+          <div class="gpx-divider-text">or import a GPX file</div>
+          <div class="gpx-divider-line"></div>
+        </div>
+        <button class="btn-gpx-import" onclick="document.getElementById('gpx-file-input').click()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Import GPX file
+        </button>
+        <div class="gpx-import-name" id="gpx-import-name"></div>
+        <input type="file" id="gpx-file-input" accept=".gpx,application/gpx+xml,text/xml,application/xml" onchange="onGpxFileSelected(event)">
+        <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px;line-height:1.5">
+          Garmin, AllTrails, Komoot, Strava — any GPX 1.0/1.1. Day cuts placed automatically, adjust with sliders.
+        </p>
       </div>
 
-      <!-- Panel 2: Skeleton -->
-      <div class="sidebar-section" id="p2" style="display:none">
-        <div class="section-title">2 — Route skeleton</div>
-        <div id="day-list" style="margin-bottom:10px"></div>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:10px">
-          Drag the numbered markers on the map to shift where each day ends.
-        </p>
-        <button class="btn btn-outline btn-sm" onclick="goBack()" style="width:100%;margin-bottom:8px">‹ Change start / finish</button>
-        <button class="btn btn-outline btn-sm" onclick="regenerate()" style="width:100%;margin-bottom:8px">↺ Regenerate route</button>
-        <button class="btn btn-accent" onclick="goToStep(3)">Confirm skeleton →</button>
+      <!-- Panel 2: Skeleton review -->
+      <div id="p2" style="display:none">
+        <!-- Candidate carousel (outside sidebar-section so it can bleed edge-to-edge) -->
+        <div class="candidates-scroll" id="candidates-strip" style="display:none"></div>
+
+        <div class="sidebar-section">
+          <div class="section-title">2 — Route skeleton</div>
+
+          <!-- Summary stats row -->
+          <div class="stats-row" id="skeleton-stats">
+            <div class="stats-cell"><div class="stats-val" id="stat-total">—</div><div class="stats-lbl">Total</div></div>
+            <div class="stats-cell"><div class="stats-val" id="stat-days">—</div><div class="stats-lbl">Days</div></div>
+            <div class="stats-cell"><div class="stats-val" id="stat-ascent">…</div><div class="stats-lbl">Ascent</div></div>
+          </div>
+
+          <div id="day-list" style="margin-bottom:10px"></div>
+          <p style="font-size:12px;color:var(--text3);margin-bottom:10px">
+            Drag the numbered day-end markers on the map, or use the sliders below each day, to shift where each day ends.
+          </p>
+          <button class="btn btn-outline btn-sm" onclick="goBack()" style="width:100%;margin-bottom:8px">‹ Change start / finish</button>
+          <button class="btn btn-outline btn-sm" onclick="regenerate()" style="width:100%;margin-bottom:8px">↺ Regenerate candidates</button>
+          <button class="btn btn-accent" onclick="goToStep(3)">Confirm skeleton →</button>
+        </div>
       </div>
 
       <!-- Panel 3: Stops -->
@@ -294,9 +381,7 @@
           Pin hotel, hostel or campsite stops. Search by name or click the map.
         </p>
         <div id="stops-list" style="margin-bottom:10px"></div>
-        <!-- Stop search -->
         <div style="margin-bottom:8px">
-          <label id="stop-search-label" style="display:none">Search for stop (after which day?)</label>
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" id="stop-day-row" style="display:none">
             <span style="font-size:12px;color:var(--text2)">After day</span>
             <input type="number" id="stop-day-input" min="1" max="13" value="1" style="width:60px;padding:6px 8px;font-size:14px">
@@ -323,7 +408,19 @@
         <button class="btn btn-accent" id="sync-btn" onclick="syncToPhone()">☁ Sync to Amble on my phone</button>
         <div class="sync-msg" id="sync-msg"></div>
         <p style="font-size:11px;color:var(--text3);text-align:center;line-height:1.5;margin-top:6px">
-          On your phone: Profile → pull-to-refresh or sync icon. The trip will appear in your multi-day planner.
+          On your phone: Profile → pull-to-refresh or sync icon. The trip will appear in your multi-day planner ready to review.
+        </p>
+        <div class="gpx-divider" style="margin:14px 0 2px">
+          <div class="gpx-divider-line"></div>
+          <div class="gpx-divider-text">download your plan</div>
+          <div class="gpx-divider-line"></div>
+        </div>
+        <button class="btn-gpx-export" onclick="downloadTripGpx()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export as GPX
+        </button>
+        <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:6px;line-height:1.5">
+          One track per day · day-end waypoints · ready for Garmin, Komoot, Strava or AllTrails.
         </p>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <button class="btn btn-outline btn-sm" onclick="newTrip()" style="width:100%">+ Plan another trip</button>
@@ -346,13 +443,23 @@ const SUPABASE_URL  = 'https://cygimxakzteygjeureqv.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_KPfqJPj4N5It7cy6y7DAZQ_8uIPQ0q8';
 const BROUTER_URL   = 'https://brouter.de/brouter';
 const MAP_STYLE     = 'https://tiles.openfreemap.org/styles/liberty';
+const OPEN_ELEVATION_URL = 'https://api.open-elevation.com/api/v1/lookup';
 const DAY_COLORS    = ['#a3e635','#3b82f6','#f59e0b','#a855f7','#ec4899','#14b8a6','#f87171','#22c55e','#06b6d4','#fb923c','#84cc16','#e11d48','#7c3aed','#0ea5e9'];
+
+// How many skeleton candidates to generate (matches native: 4 variants)
+const CANDIDATE_COUNT = 4;
+// Bearing offsets used for compass-fallback candidates
+const CANDIDATE_BEARINGS = [0, 90, 180, 270];
+// Big loop threshold in metres (matches tripSkeletonService.ts)
+const BIG_LOOP_THRESHOLD_M = 30_000;
 
 const { createClient } = window.supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let trip = newTripObj();
+let candidates = []; // SkeletonCandidate[]
+let activeCandidateIdx = 0;
 let pickingMode = null; // 'start'|'finish'|'stop'
 let stopPickDayIdx = null;
 let placeDebounce = {};
@@ -390,14 +497,9 @@ map.on('click', e => {
   const { lng, lat } = e.lngLat;
   const coord = { latitude: lat, longitude: lng };
   const label = `${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°${lng < 0 ? 'W' : 'E'}`;
-
-  if (pickingMode === 'start') {
-    setPlace('start', coord, label);
-  } else if (pickingMode === 'finish') {
-    setPlace('finish', coord, label);
-  } else if (pickingMode === 'stop') {
-    placeStop(coord, stopPickDayIdx);
-  }
+  if (pickingMode === 'start') setPlace('start', coord, label);
+  else if (pickingMode === 'finish') setPlace('finish', coord, label);
+  else if (pickingMode === 'stop') placeStop(coord, stopPickDayIdx);
   endPickMode();
 });
 
@@ -409,12 +511,10 @@ async function checkSession() {
     onSignedIn(data.session.user);
   }
 }
-
 function onSignedIn(user) {
   document.getElementById('auth-panel').style.display = 'none';
   document.getElementById('user-display').textContent = user.email || 'Signed in';
 }
-
 async function signInWith(provider) {
   document.getElementById('auth-err').textContent = '';
   const btnId = provider === 'apple' ? 'btn-apple' : 'btn-google';
@@ -425,7 +525,6 @@ async function signInWith(provider) {
   });
   if (error) { document.getElementById('auth-err').textContent = error.message; setLoading(btnId, false); }
 }
-
 async function signOut() {
   await sb.auth.signOut();
   document.getElementById('auth-panel').style.display = 'flex';
@@ -436,16 +535,16 @@ async function signOut() {
 let currentStep = 1;
 function goToStep(n) {
   currentStep = n;
-  ['p1','p2','p3','p4'].forEach((id, i) => {
-    document.getElementById(id).style.display = i + 1 === n ? 'block' : 'none';
-  });
+  document.getElementById('p1').style.display = n === 1 ? 'block' : 'none';
+  document.getElementById('p2').style.display = n === 2 ? 'block' : 'none';
+  document.getElementById('p3').style.display = n === 3 ? 'block' : 'none';
+  document.getElementById('p4').style.display = n === 4 ? 'block' : 'none';
   ['s1','s2','s3','s4'].forEach((id, i) => {
     document.getElementById(id).className = 'step' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
   });
   if (n === 3) renderStopList();
   if (n === 4) renderSummary();
 }
-
 function goBack() { goToStep(1); }
 
 // ── Place search (Nominatim) ──────────────────────────────────────────────────
@@ -472,7 +571,6 @@ function onPlaceInput(which) {
 }
 
 function onPlaceFocus(which) {
-  // Show pick-on-map hint
   const hint = document.getElementById('pick-hint');
   hint.textContent = which === 'start' ? '🟢 Or click the map to set start' : '🔴 Or click the map to set finish';
   hint.style.display = 'block';
@@ -517,7 +615,6 @@ function setPlace(which, coord, label) {
   if (which === 'start') {
     trip.start = coord; trip.startLabel = label;
     if (trip.isLoop) { trip.finish = coord; trip.finishLabel = label; updateFinishDisplay(); }
-    // Map marker
     if (startMarker) startMarker.remove();
     startMarker = new maplibregl.Marker({ element: makePin('S', '#a3e635') })
       .setLngLat([coord.longitude, coord.latitude]).addTo(map);
@@ -529,7 +626,6 @@ function setPlace(which, coord, label) {
       .setLngLat([coord.longitude, coord.latitude]).addTo(map);
     map.flyTo({ center: [coord.longitude, coord.latitude], zoom: Math.max(map.getZoom(), 10) });
   }
-  // Show "set" pill, hide search box
   document.getElementById(`${which}-set-name`).textContent = label;
   document.getElementById(`${which}-set`).style.display = 'flex';
   document.getElementById(`${which}-search-wrap`).style.display = 'none';
@@ -587,6 +683,181 @@ function endPickMode() {
   map.getCanvas().style.cursor = '';
 }
 
+// ── Geometry helpers ──────────────────────────────────────────────────────────
+function haversine(a, b) {
+  const R = 6371000, r = d => d * Math.PI / 180;
+  const dLat = r(b.latitude - a.latitude), dLon = r(b.longitude - a.longitude);
+  const h = Math.sin(dLat/2)**2 + Math.cos(r(a.latitude)) * Math.cos(r(b.latitude)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function totalDist(coords) { let d = 0; for (let i = 1; i < coords.length; i++) d += haversine(coords[i-1], coords[i]); return d; }
+function cumDist(coords) { const c = [0]; for (let i = 1; i < coords.length; i++) c.push(c[i-1] + haversine(coords[i-1], coords[i])); return c; }
+
+function equalDayEnds(coords, days) {
+  const c = cumDist(coords), tot = c[c.length - 1], ends = [];
+  for (let d = 1; d < days; d++) {
+    const target = (d / days) * tot;
+    let best = 1;
+    for (let i = 1; i < c.length; i++) { if (c[i] >= target) { best = i; break; } }
+    ends.push({ kind: 'cut', index: best });
+  }
+  return ends;
+}
+
+function nearestIdx(coords, lat, lng) {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    const d = (coords[i].latitude - lat)**2 + (coords[i].longitude - lng)**2;
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+
+function boundaries(skeleton) {
+  const { coordinates, dayEnds } = skeleton;
+  return [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestIdx(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
+}
+
+// Distance from start in metres at bearing deg, for synthesising loop anchors.
+function offsetCoord(from, distanceMetres, bearingDeg) {
+  const R = 6371000;
+  const br = (bearingDeg * Math.PI) / 180;
+  const lat1 = (from.latitude * Math.PI) / 180;
+  const lon1 = (from.longitude * Math.PI) / 180;
+  const d = distanceMetres / R;
+  const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d) + Math.cos(lat1)*Math.sin(d)*Math.cos(br));
+  const lon2 = lon1 + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
+  return { latitude: (lat2*180)/Math.PI, longitude: (lon2*180)/Math.PI };
+}
+
+function bearingLabel(deg) {
+  const n = ((deg % 360) + 360) % 360;
+  return ['N','NE','E','SE','S','SW','W','NW'][Math.round(n / 45) % 8];
+}
+
+// ── BRouter ───────────────────────────────────────────────────────────────────
+async function routeBRouter(waypoints) {
+  // waypoints: [{latitude, longitude}, ...]
+  const lonlats = waypoints.map(w => `${w.longitude},${w.latitude}`).join('|');
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
+  const r = await fetch(url);
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Routing failed (${r.status})${text ? ': ' + text.slice(0, 80) : ''}`);
+  }
+  const gj = await r.json();
+  const feat = gj.features?.[0];
+  if (!feat) throw new Error('No route returned from routing service');
+  const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+  return coords;
+}
+
+// Route a loop via an intermediate midpoint so BRouter doesn't return trivial zero-route
+async function routeLoop(start, totalMetres, bearingDeg) {
+  // Use 3 evenly-spaced anchors around the start at the appropriate radius.
+  // Radius = totalMetres / (2π) gives a circle whose perimeter ≈ totalMetres.
+  const radius = totalMetres / (2 * Math.PI);
+  const anchors = [0, 1, 2].map(i => offsetCoord(start, radius, bearingDeg + i * 120));
+  const waypoints = [start, ...anchors, start];
+  return routeBRouter(waypoints);
+}
+
+// ── Elevation (Open-Elevation API, best-effort) ───────────────────────────────
+async function fetchElevationStats(coords) {
+  // Subsample to keep the request small — max 100 points for the quick stats
+  const step = Math.max(1, Math.floor(coords.length / 100));
+  const sampled = coords.filter((_, i) => i % step === 0);
+  try {
+    const r = await fetch(OPEN_ELEVATION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locations: sampled.map(c => ({ latitude: c.latitude, longitude: c.longitude })) }),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    const elevs = data.results?.map(p => p.elevation) ?? [];
+    if (elevs.length < 2) return null;
+    let ascent = 0;
+    for (let i = 1; i < elevs.length; i++) {
+      const diff = elevs[i] - elevs[i - 1];
+      if (diff > 0) ascent += diff;
+    }
+    return { ascentMetres: Math.round(ascent) };
+  } catch { return null; }
+}
+
+// ── Multi-candidate skeleton generation ──────────────────────────────────────
+async function planSkeletonCandidates(start, finish, isLoop, targetDayCount, targetKmPerDay) {
+  const totalMetres = Math.max(1000, targetDayCount * targetKmPerDay * 1000);
+  const results = [];
+
+  if (isLoop) {
+    // Generate CANDIDATE_COUNT candidates at different bearings (0°, 90°, 180°, 270°).
+    // Each uses 3 anchor points arranged around the start — same approach as the native
+    // planSynthesizedLoop / planSkeletonCandidates logic.
+    const errors = [];
+    const attempts = await Promise.allSettled(
+      CANDIDATE_BEARINGS.map(async (bearing) => {
+        const coords = await routeLoop(start, totalMetres, bearing);
+        if (!coords || coords.length < 2) throw new Error('Empty route');
+        const dist = totalDist(coords);
+        // Distance gate: discard if wildly off target (same as native 60–180% window)
+        const frac = dist / totalMetres;
+        if (frac < 0.55 || frac > 2.0) throw new Error(`Route ${(dist/1000).toFixed(1)}km too far from target ${(totalMetres/1000).toFixed(1)}km`);
+        return { coords, dist, bearing };
+      })
+    );
+
+    for (const r of attempts) {
+      if (r.status === 'fulfilled') results.push(r.value);
+      else errors.push(r.reason?.message ?? 'failed');
+    }
+
+    // If all compass bearings failed, try a simple 1-waypoint offset as a final fallback
+    if (results.length === 0) {
+      console.warn('[candidates] All compass attempts failed, trying simple offset fallback:', errors);
+      const mid = { latitude: start.latitude + 0.045, longitude: start.longitude };
+      const coords = await routeBRouter([start, mid, finish]);
+      if (coords && coords.length >= 2) {
+        results.push({ coords, dist: totalDist(coords), bearing: 0 });
+      }
+    }
+  } else {
+    // Point-to-point: one route (BRouter start → finish)
+    const coords = await routeBRouter([start, finish]);
+    if (!coords || coords.length < 2) throw new Error('No route found between start and finish');
+    results.push({ coords, dist: totalDist(coords), bearing: 0 });
+  }
+
+  if (results.length === 0) throw new Error('Could not generate any skeleton candidates');
+
+  // Deduplicate candidates that are nearly identical (same distance within 5%)
+  const deduped = [];
+  for (const r of results) {
+    const dup = deduped.find(d => Math.abs(d.dist - r.dist) / r.dist < 0.05);
+    if (!dup) deduped.push(r);
+  }
+
+  // Build candidate objects with day-end cuts
+  const built = deduped.map(({ coords, dist, bearing }, i) => {
+    const dayEnds = equalDayEnds(coords, targetDayCount);
+    return {
+      skeleton: { coordinates: coords, distanceMetres: dist, dayEnds },
+      bearing,
+      greeneryFraction: 0, // scoring not available in browser without Overpass; will be filled in
+      label: isLoop ? bearingLabel(bearing) : 'Route',
+      kmTotal: (dist / 1000).toFixed(1),
+    };
+  });
+
+  // Label the first one as the primary if we have multiples
+  if (built.length > 1) {
+    built[0].label = `${bearingLabel(built[0].bearing)} · Main`;
+  }
+
+  return built;
+}
+
 // ── Generate skeleton ─────────────────────────────────────────────────────────
 async function generateSkeleton() {
   document.getElementById('gen-err').textContent = '';
@@ -601,22 +872,33 @@ async function generateSkeleton() {
   setLoading('gen-btn', true);
 
   try {
-    const coords = await routeBRouter(trip.start, finish, trip.isLoop);
-    if (!coords || coords.length < 2) throw new Error('No route found — try different start/finish points');
+    candidates = await planSkeletonCandidates(trip.start, finish, trip.isLoop, trip.targetDayCount, trip.targetKmPerDay);
 
-    const totalM = totalDist(coords);
-    trip.skeleton = {
-      coordinates: coords,
-      distanceMetres: totalM,
-      dayEnds: equalDayEnds(coords, trip.targetDayCount),
-    };
-    trip.stage = 'skeleton';
-    trip.updatedAt = new Date().toISOString();
+    // Fetch elevation for the first candidate asynchronously (non-blocking)
+    fetchElevationStats(candidates[0].skeleton.coordinates).then(elev => {
+      if (elev) {
+        document.getElementById('stat-ascent').textContent = `${elev.ascentMetres}m`;
+      }
+    });
 
+    // Activate first candidate
+    activeCandidateIdx = 0;
+    applyCandidate(0);
+
+    // Build trip.skeletonCandidates for sync (matches native SkeletonCandidate shape)
+    trip.skeletonCandidates = candidates.map(c => ({
+      skeleton: c.skeleton,
+      dayEnds: c.skeleton.dayEnds.map(de => c.skeleton.coordinates[de.index]),
+      bearingDeg: c.bearing,
+      greeneryFraction: c.greeneryFraction,
+      label: c.label,
+    }));
+
+    renderCandidateStrip();
     renderOnMap();
     placeDayEndMarkers();
     renderDayList();
-    fitMap(coords);
+    fitMap(candidates[0].skeleton.coordinates);
     goToStep(2);
   } catch (e) {
     document.getElementById('gen-err').textContent = '⚠ ' + (e.message || 'Route generation failed');
@@ -630,60 +912,48 @@ async function regenerate() {
   await generateSkeleton();
 }
 
-// ── BRouter ───────────────────────────────────────────────────────────────────
-async function routeBRouter(start, finish, isLoop) {
-  // For a loop, add an intermediate waypoint offset slightly so BRouter
-  // doesn't return a trivial zero-distance route
-  let lonlats;
-  if (isLoop) {
-    // Offset midpoint ~5km north to encourage a real loop
-    const mid = { latitude: start.latitude + 0.045, longitude: start.longitude };
-    lonlats = `${start.longitude},${start.latitude}|${mid.longitude},${mid.latitude}|${finish.longitude},${finish.latitude}`;
-  } else {
-    lonlats = `${start.longitude},${start.latitude}|${finish.longitude},${finish.latitude}`;
-  }
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
-  const r = await fetch(url);
-  if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    throw new Error(`Routing failed (${r.status})${text ? ': ' + text.slice(0, 80) : ''}`);
-  }
-  const gj = await r.json();
-  const feat = gj.features?.[0];
-  if (!feat) throw new Error('No route returned from routing service');
-  return feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+// ── Candidate selection ───────────────────────────────────────────────────────
+function applyCandidate(idx) {
+  activeCandidateIdx = idx;
+  trip.skeleton = candidates[idx].skeleton;
+  trip.stage = 'skeleton';
+  trip.updatedAt = new Date().toISOString();
+  renderOnMap();
+  placeDayEndMarkers();
+  renderDayList();
+  updateSkeletonStats();
+  // Re-fetch elevation for the newly active candidate (fire-and-forget)
+  document.getElementById('stat-ascent').textContent = '…';
+  fetchElevationStats(trip.skeleton.coordinates).then(elev => {
+    document.getElementById('stat-ascent').textContent = elev ? `${elev.ascentMetres}m` : '?';
+  });
 }
 
-// ── Geometry helpers ──────────────────────────────────────────────────────────
-function haversine(a, b) {
-  const R = 6371000, r = d => d * Math.PI / 180;
-  const dLat = r(b.latitude - a.latitude), dLon = r(b.longitude - a.longitude);
-  const h = Math.sin(dLat/2)**2 + Math.cos(r(a.latitude)) * Math.cos(r(b.latitude)) * Math.sin(dLon/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(h));
+function updateSkeletonStats() {
+  if (!trip.skeleton) return;
+  const km = (trip.skeleton.distanceMetres / 1000).toFixed(1);
+  document.getElementById('stat-total').textContent = `${km} km`;
+  document.getElementById('stat-days').textContent = `${trip.targetDayCount}`;
 }
-function totalDist(coords) { let d = 0; for (let i = 1; i < coords.length; i++) d += haversine(coords[i-1], coords[i]); return d; }
-function cumDist(coords) { const c = [0]; for (let i = 1; i < coords.length; i++) c.push(c[i-1] + haversine(coords[i-1], coords[i])); return c; }
-function equalDayEnds(coords, days) {
-  const c = cumDist(coords), tot = c[c.length - 1], ends = [];
-  for (let d = 1; d < days; d++) {
-    const target = (d / days) * tot;
-    let best = 1;
-    for (let i = 1; i < c.length; i++) { if (c[i] >= target) { best = i; break; } }
-    ends.push({ kind: 'cut', index: best });
-  }
-  return ends;
+
+function renderCandidateStrip() {
+  const strip = document.getElementById('candidates-strip');
+  if (candidates.length <= 1) { strip.style.display = 'none'; return; }
+  strip.style.display = 'flex';
+  strip.innerHTML = candidates.map((c, i) =>
+    `<div class="candidate-pill${i === 0 ? ' active' : ''}" id="cpill-${i}" onclick="selectCandidate(${i})">
+      <div class="cpill-label">${c.label}</div>
+      <div class="cpill-sub">${c.kmTotal} km</div>
+    </div>`
+  ).join('');
 }
-function nearestIdx(coords, lat, lng) {
-  let best = 0, bd = Infinity;
-  for (let i = 0; i < coords.length; i++) {
-    const d = (coords[i].latitude - lat)**2 + (coords[i].longitude - lng)**2;
-    if (d < bd) { bd = d; best = i; }
-  }
-  return best;
-}
-function boundaries() {
-  const { coordinates, dayEnds } = trip.skeleton;
-  return [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestIdx(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
+
+function selectCandidate(idx) {
+  if (idx === activeCandidateIdx) return;
+  document.getElementById(`cpill-${activeCandidateIdx}`)?.classList.remove('active');
+  document.getElementById(`cpill-${idx}`)?.classList.add('active');
+  applyCandidate(idx);
+  fitMap(trip.skeleton.coordinates);
 }
 
 // ── Map rendering ─────────────────────────────────────────────────────────────
@@ -692,7 +962,7 @@ function emptyGJ() { return { type: 'Feature', properties: {}, geometry: { type:
 function renderOnMap() {
   if (!trip.skeleton || !map.isStyleLoaded()) return;
   const { coordinates } = trip.skeleton;
-  const b = boundaries(), n = trip.targetDayCount;
+  const b = boundaries(trip.skeleton), n = trip.targetDayCount;
   for (let i = 0; i < 14; i++) {
     const src = map.getSource(`seg${i}`);
     if (!src) continue;
@@ -717,12 +987,23 @@ function placeDayEndMarkers() {
       .setLngLat([coord.longitude, coord.latitude]).addTo(map);
     m.on('dragend', () => {
       const { lat, lng } = m.getLngLat();
-      const idx = nearestIdx(coordinates, lat, lng);
+      // Clamp drag to stay between neighbours (matches native slider bounds logic)
+      const prevBound = i === 0 ? 0 : (trip.skeleton.dayEnds[i-1].kind === 'cut' ? trip.skeleton.dayEnds[i-1].index : nearestIdx(coordinates, trip.skeleton.dayEnds[i-1].coord.latitude, trip.skeleton.dayEnds[i-1].coord.longitude));
+      const nextBound = i === dayEnds.length - 1 ? coordinates.length - 1 : (trip.skeleton.dayEnds[i+1].kind === 'cut' ? trip.skeleton.dayEnds[i+1].index : nearestIdx(coordinates, trip.skeleton.dayEnds[i+1].coord.latitude, trip.skeleton.dayEnds[i+1].coord.longitude));
+      let idx = nearestIdx(coordinates, lat, lng);
+      idx = Math.max(prevBound + 1, Math.min(nextBound - 1, idx));
       const c = coordinates[idx];
       m.setLngLat([c.longitude, c.latitude]);
       trip.skeleton.dayEnds[i] = { kind: 'cut', index: idx };
       trip.updatedAt = new Date().toISOString();
       renderOnMap(); renderDayList();
+      // Sync slider position
+      const slider = document.getElementById(`slider-${i}`);
+      if (slider) {
+        const cd = cumDist(coordinates);
+        const frac = cd[idx] / (cd[cd.length - 1] || 1);
+        slider.value = (frac * 1000).toFixed(0);
+      }
     });
     dayEndMarkers.push(m);
   });
@@ -746,14 +1027,16 @@ function fitMap(coords) {
   map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: { top: 60, bottom: 60, left: 60, right: 60 }, duration: 800 });
 }
 
-// ── Day list ──────────────────────────────────────────────────────────────────
+// ── Day list + sliders ────────────────────────────────────────────────────────
 function renderDayList() {
   if (!trip.skeleton) return;
-  const { coordinates } = trip.skeleton;
-  const c = cumDist(coordinates), b = boundaries(), n = trip.targetDayCount;
+  const { coordinates, dayEnds } = trip.skeleton;
+  const cd = cumDist(coordinates);
+  const totalM = cd[cd.length - 1] || 1;
+  const b = boundaries(trip.skeleton), n = trip.targetDayCount;
   let html = '';
   for (let i = 0; i < n; i++) {
-    const km = ((c[b[i+1]] - c[b[i]]) / 1000).toFixed(1);
+    const km = ((cd[b[i+1]] - cd[b[i]]) / 1000).toFixed(1);
     const color = DAY_COLORS[i % DAY_COLORS.length];
     const stop = trip.preBookedStops.find(s => s.dayIndex === i);
     html += `<div class="day-row">
@@ -764,19 +1047,102 @@ function renderDayList() {
       </div>
       <div class="day-km">${km} km</div>
     </div>`;
+    // Slider for the boundary after this day (not shown for last day)
+    if (i < n - 1 && i < dayEnds.length) {
+      const de = dayEnds[i];
+      const curIdx = de.kind === 'cut' ? de.index : nearestIdx(coordinates, de.coord.latitude, de.coord.longitude);
+      const curFrac = cd[curIdx] / totalM;
+
+      // Bounds: prev boundary and next boundary (in fractions of 0-1000)
+      const prevBound = i === 0 ? 0 : (() => {
+        const prev = dayEnds[i-1];
+        const prevIdx = prev.kind === 'cut' ? prev.index : nearestIdx(coordinates, prev.coord.latitude, prev.coord.longitude);
+        return cd[prevIdx] / totalM;
+      })();
+      const nextBound = i === dayEnds.length - 1 ? 1 : (() => {
+        const next = dayEnds[i+1];
+        const nextIdx = next.kind === 'cut' ? next.index : nearestIdx(coordinates, next.coord.latitude, next.coord.longitude);
+        return cd[nextIdx] / totalM;
+      })();
+
+      const sliderMin = Math.ceil(prevBound * 1000) + 1;
+      const sliderMax = Math.floor(nextBound * 1000) - 1;
+      const sliderVal = Math.round(curFrac * 1000);
+
+      html += `<div class="day-slider-row">
+        <input type="range" class="day-slider" id="slider-${i}"
+          min="${sliderMin}" max="${sliderMax}" value="${sliderVal}"
+          style="background: linear-gradient(to right, ${color} 0%, ${color} ${((sliderVal - sliderMin)/(sliderMax - sliderMin)*100).toFixed(1)}%, var(--border) ${((sliderVal - sliderMin)/(sliderMax - sliderMin)*100).toFixed(1)}%, var(--border) 100%);"
+          oninput="onSliderInput(${i}, this)"
+          onchange="onSliderChange(${i}, this)">
+      </div>`;
+    }
   }
   document.getElementById('day-list').innerHTML = html;
+
+  // Apply slider thumb color matching the day
+  for (let i = 0; i < n - 1 && i < dayEnds.length; i++) {
+    const slider = document.getElementById(`slider-${i}`);
+    if (slider) {
+      slider.style.setProperty('--thumb-color', DAY_COLORS[i % DAY_COLORS.length]);
+      slider.style.accentColor = DAY_COLORS[i % DAY_COLORS.length];
+    }
+  }
+}
+
+function onSliderInput(i, slider) {
+  if (!trip.skeleton) return;
+  const { coordinates } = trip.skeleton;
+  const cd = cumDist(coordinates);
+  const totalM = cd[cd.length - 1] || 1;
+  const frac = parseInt(slider.value) / 1000;
+  const target = frac * totalM;
+  let idx = 0;
+  for (let j = 1; j < cd.length; j++) { if (cd[j] >= target) { idx = j; break; } }
+  // Clamp between neighbours
+  const prevBound = i === 0 ? 0 : (() => {
+    const prev = trip.skeleton.dayEnds[i-1];
+    return prev.kind === 'cut' ? prev.index : nearestIdx(coordinates, prev.coord.latitude, prev.coord.longitude);
+  })();
+  const nextBound = i === trip.skeleton.dayEnds.length - 1 ? coordinates.length - 1 : (() => {
+    const next = trip.skeleton.dayEnds[i+1];
+    return next.kind === 'cut' ? next.index : nearestIdx(coordinates, next.coord.latitude, next.coord.longitude);
+  })();
+  idx = Math.max(prevBound + 1, Math.min(nextBound - 1, idx));
+
+  // Update gradient fill
+  const min = parseInt(slider.min), max = parseInt(slider.max), val = parseInt(slider.value);
+  const pct = ((val - min) / (max - min) * 100).toFixed(1);
+  const color = DAY_COLORS[i % DAY_COLORS.length];
+  slider.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, var(--border) ${pct}%, var(--border) 100%)`;
+
+  trip.skeleton.dayEnds[i] = { kind: 'cut', index: idx };
+  trip.updatedAt = new Date().toISOString();
+  renderOnMap();
+  // Snap the draggable map marker to the new position
+  if (dayEndMarkers[i]) {
+    const c = coordinates[idx];
+    dayEndMarkers[i].setLngLat([c.longitude, c.latitude]);
+  }
+}
+
+function onSliderChange(i, slider) {
+  // Full re-render on release (updates km labels)
+  renderDayList();
 }
 
 // ── Overnight stops ───────────────────────────────────────────────────────────
 function showStopSearch() {
   const n = trip.targetDayCount;
-  document.getElementById('stop-search-label').style.display = 'block';
   document.getElementById('stop-day-row').style.display = 'flex';
   document.getElementById('stop-day-max').textContent = `(1 – ${n - 1})`;
   document.getElementById('stop-day-input').max = n - 1;
   document.getElementById('stop-search-wrap').style.display = 'block';
   document.getElementById('stop-input').focus();
+  pickingMode = 'stop';
+  const hint = document.getElementById('pick-hint');
+  hint.textContent = '🏨 Or click the map to pin a stop';
+  hint.style.display = 'block';
 }
 
 async function onStopInput() {
@@ -816,6 +1182,7 @@ function selectStop(idx) {
   placeStop(coord, dayIdx, name);
   clearStopInput();
   hideStopSearch();
+  endPickMode();
 }
 
 function clearStopInput() {
@@ -825,14 +1192,12 @@ function clearStopInput() {
 }
 
 function hideStopSearch() {
-  document.getElementById('stop-search-label').style.display = 'none';
   document.getElementById('stop-day-row').style.display = 'none';
   document.getElementById('stop-search-wrap').style.display = 'none';
 }
 
 async function placeStop(coord, dayIdx, name) {
   if (!name) {
-    // Reverse geocode
     try {
       const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`);
       const j = await r.json();
@@ -901,6 +1266,276 @@ async function syncToPhone() {
   }
 }
 
+// ── GPX import ────────────────────────────────────────────────────────────────
+// Mirrors gpxImportService.ts + createTripFromRoute() in AboutAndDataSection.tsx
+// exactly — same resolution order (trkpt → rtept → wpt), same name extraction,
+// same evenly-spaced day cuts, same skeletonCandidates seeding with 'Original route'.
+
+function gpxExtractPoints(xml, tagName) {
+  const re = new RegExp(`<${tagName}[^>]+lat=["']([\\d.\\-]+)["'][^>]+lon=["']([\\d.\\-]+)["']`, 'gi');
+  const pts = [];
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+    if (!isNaN(lat) && !isNaN(lon)) pts.push({ latitude: lat, longitude: lon });
+  }
+  if (pts.length === 0) {
+    // Handle lon-before-lat attribute ordering (some Garmin exports)
+    const re2 = new RegExp(`<${tagName}[^>]+lon=["']([\\d.\\-]+)["'][^>]+lat=["']([\\d.\\-]+)["']`, 'gi');
+    while ((m = re2.exec(xml)) !== null) {
+      const lon = parseFloat(m[1]), lat = parseFloat(m[2]);
+      if (!isNaN(lat) && !isNaN(lon)) pts.push({ latitude: lat, longitude: lon });
+    }
+  }
+  return pts;
+}
+
+function gpxExtractWaypoints(xml) {
+  const wpts = [];
+  const blockRe = /<wpt\b([^>]*)>([\s\S]*?)<\/wpt>/gi;
+  let block;
+  while ((block = blockRe.exec(xml)) !== null) {
+    const latM = block[1].match(/lat=["']([\d.\-]+)["']/i);
+    const lonM = block[1].match(/lon=["']([\d.\-]+)["']/i);
+    if (!latM || !lonM) continue;
+    const lat = parseFloat(latM[1]), lon = parseFloat(lonM[1]);
+    if (isNaN(lat) || isNaN(lon)) continue;
+    wpts.push({ latitude: lat, longitude: lon });
+  }
+  return wpts;
+}
+
+function gpxExtractTagText(xml, tag) {
+  const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const m = xml.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function parseGpxText(gpxText, filename) {
+  if (!gpxText || !gpxText.includes('<')) return { ok: false, error: 'File does not appear to be a valid GPX file.' };
+
+  // Resolution order: trkpt → rtept → wpt (same as native app)
+  let coordinates = gpxExtractPoints(gpxText, 'trkpt');
+  if (coordinates.length < 2) coordinates = gpxExtractPoints(gpxText, 'rtept');
+  if (coordinates.length < 2) {
+    const wpts = gpxExtractWaypoints(gpxText);
+    if (wpts.length === 0) return { ok: false, error: 'No trackpoints found. Make sure the file contains <trkpt> or <rtept> elements.' };
+    if (wpts.length === 1) return { ok: false, error: 'GPX file only contains 1 waypoint. At least 2 points are needed.' };
+    coordinates = wpts;
+  }
+
+  // Name extraction: prefer <trk><name>, then <rte><name>, then root <name>, then filename
+  let name = null;
+  const trkMatch = gpxText.match(/<trk[\s>][\s\S]*?<\/trk>/i);
+  if (trkMatch) name = gpxExtractTagText(trkMatch[0], 'name');
+  if (!name) { const rteMatch = gpxText.match(/<rte[\s>][\s\S]*?<\/rte>/i); if (rteMatch) name = gpxExtractTagText(rteMatch[0], 'name'); }
+  if (!name) name = gpxExtractTagText(gpxText, 'name');
+  if (!name && filename) name = filename.replace(/\.gpx$/i, '').replace(/[_-]/g, ' ').trim();
+  if (!name) name = 'Imported route';
+  if (name.length > 60) name = name.slice(0, 60).trimEnd();
+
+  const distanceMetres = totalDist(coordinates);
+  return { ok: true, coordinates, name, distanceMetres };
+}
+
+function createTripFromGpx(coordinates, name, distanceMetres, dayCount) {
+  const now = new Date();
+  const km = distanceMetres / 1000;
+  // Clamp dayCount so it never exceeds coordinate count (same guard as native app)
+  const safeDayCount = Math.min(dayCount, Math.max(1, coordinates.length - 1));
+  const targetKmPerDay = safeDayCount > 0 && km > 0 ? Math.round(km / safeDayCount) : 15;
+
+  // Even cuts along the coordinate array (same step logic as native createTripFromRoute)
+  const step = Math.floor(coordinates.length / safeDayCount);
+  const dayEnds = Array.from({ length: safeDayCount - 1 }, (_, i) => ({
+    kind: 'cut',
+    index: Math.min(step * (i + 1), coordinates.length - 2),
+  }));
+
+  const skeleton = { coordinates, distanceMetres, dayEnds };
+
+  // Populate trip state (mirrors newTripObj shape)
+  trip = newTripObj();
+  trip.name = name;
+  trip.start = coordinates[0];
+  trip.startLabel = name + ' (start)';
+  trip.finish = coordinates[coordinates.length - 1];
+  trip.finishLabel = name + ' (end)';
+  trip.isLoop = false;
+  trip.targetDayCount = safeDayCount;
+  trip.targetKmPerDay = targetKmPerDay;
+  trip.skeleton = skeleton;
+  trip.stage = 'skeleton';
+  trip.updatedAt = now.toISOString();
+
+  // Seed carousel with 'Original route' — same as native createTripFromRoute
+  trip.skeletonCandidates = [{
+    skeleton,
+    dayEnds: dayEnds.map(de => coordinates[de.index]),
+    bearingDeg: 0,
+    greeneryFraction: 0,
+    label: 'Original route',
+  }];
+
+  // Build the local candidates array so the carousel renders (1 pill = hidden strip)
+  candidates = [{
+    skeleton,
+    bearing: 0,
+    greeneryFraction: 0,
+    label: 'Original route',
+    kmTotal: (distanceMetres / 1000).toFixed(1),
+  }];
+  activeCandidateIdx = 0;
+}
+
+async function onGpxFileSelected(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const filename = file.name;
+
+  let gpxText;
+  try {
+    gpxText = await file.text();
+  } catch {
+    toast('Could not read file', 'red');
+    return;
+  }
+
+  const parsed = parseGpxText(gpxText, filename);
+  if (!parsed.ok) {
+    toast(parsed.error, 'red');
+    document.getElementById('gen-err').textContent = '⚠ ' + parsed.error;
+    return;
+  }
+
+  const { coordinates, name, distanceMetres } = parsed;
+  const km = distanceMetres / 1000;
+
+  // Auto-suggest day count at ~15 km/day, same as native app
+  const suggestedDays = Math.min(14, Math.max(1, Math.round(km / 15)));
+
+  // Show the file name in the UI
+  document.getElementById('gpx-import-name').textContent = `✓ ${filename} · ${km.toFixed(1)} km`;
+  document.getElementById('gen-err').textContent = '';
+
+  // Ask how many days — fill the form values and pre-populate name, then jump to skeleton
+  document.getElementById('trip-name').value = name;
+  document.getElementById('day-count').value = suggestedDays;
+  document.getElementById('km-day').value = Math.round(km / suggestedDays) || 15;
+
+  // Build the trip object from the GPX
+  createTripFromGpx(coordinates, name, distanceMetres, suggestedDays);
+
+  // Place start/finish markers
+  if (startMarker) startMarker.remove();
+  startMarker = new maplibregl.Marker({ element: makePin('S', '#a3e635') })
+    .setLngLat([coordinates[0].longitude, coordinates[0].latitude]).addTo(map);
+  if (finishMarker) finishMarker.remove();
+  finishMarker = new maplibregl.Marker({ element: makePin('F', '#ef4444', '#fff') })
+    .setLngLat([coordinates[coordinates.length-1].longitude, coordinates[coordinates.length-1].latitude]).addTo(map);
+
+  // Update the "set" pills
+  document.getElementById('start-set-name').textContent = name + ' (start)';
+  document.getElementById('start-set').style.display = 'flex';
+  document.getElementById('start-search-wrap').style.display = 'none';
+  document.getElementById('finish-set-name').textContent = name + ' (end)';
+  document.getElementById('finish-set').style.display = 'flex';
+  document.getElementById('finish-search-wrap').style.display = 'none';
+
+  renderCandidateStrip(); // 1 candidate → strip stays hidden (same as native single-candidate)
+  renderOnMap();
+  placeDayEndMarkers();
+  renderDayList();
+  fitMap(coordinates);
+  updateSkeletonStats();
+
+  // Fire-and-forget elevation
+  document.getElementById('stat-ascent').textContent = '…';
+  fetchElevationStats(coordinates).then(elev => {
+    document.getElementById('stat-ascent').textContent = elev ? `${elev.ascentMetres}m` : '?';
+  });
+
+  goToStep(2);
+  toast(`Imported: ${name}`, 'green');
+
+  // Reset the file input so the same file can be re-selected
+  e.target.value = '';
+}
+
+// ── GPX export ────────────────────────────────────────────────────────────────
+// Mirrors buildTripGpx() in gpxExport.ts exactly:
+//   • <wpt> for each day-end (cut → "Day N end", pinned → its label)
+//   • One <trk> per day in trip.days if they exist, else the skeleton polyline
+//   • Interpolated <time> stamps 24h apart per day (so Garmin/Komoot treats as activity)
+
+function gpxEscape(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+function buildTripGpx() {
+  if (!trip.skeleton) return null;
+  const escape = gpxEscape;
+  const { coordinates, dayEnds } = trip.skeleton;
+  const b = boundaries(trip.skeleton);
+  const n = trip.targetDayCount;
+
+  // Waypoints at each day-end boundary (same as native buildTripGpx)
+  const wpts = dayEnds.map((de, i) => {
+    const coord = de.kind === 'pinned' ? de.coord : coordinates[de.index];
+    if (!coord) return '';
+    const wptName = de.kind === 'pinned' ? de.label : `Day ${i + 1} end`;
+    return `  <wpt lat="${coord.latitude.toFixed(7)}" lon="${coord.longitude.toFixed(7)}">\n    <name>${escape(wptName)}</name>\n    <sym>Campground</sym>\n  </wpt>`;
+  }).filter(Boolean);
+
+  // One <trk> per day — use the skeleton segments (web planner doesn't run per-day
+  // route refinement, so we always use the skeleton polyline, same as the native
+  // "no day routes yet" fallback in buildTripGpx)
+  const tracks = [];
+  let dayStartTime = new Date(trip.createdAt).getTime();
+  for (let i = 0; i < n; i++) {
+    const segCoords = coordinates.slice(b[i], b[i + 1] + 1);
+    if (segCoords.length === 0) continue;
+    const segDistM = totalDist(segCoords);
+    // Naismith: 5 km/h
+    const durationMs = (segDistM / 1000 / 5) * 3600 * 1000;
+    const segPts = segCoords.map((c, idx) => {
+      const t = segCoords.length > 1 ? dayStartTime + (durationMs * idx) / (segCoords.length - 1) : dayStartTime;
+      return `      <trkpt lat="${c.latitude.toFixed(7)}" lon="${c.longitude.toFixed(7)}"><time>${new Date(t).toISOString()}</time></trkpt>`;
+    }).join('\n');
+    const segKm = (segDistM / 1000).toFixed(1);
+    const segMin = Math.round(durationMs / 60000);
+    tracks.push(
+      `  <trk>\n    <name>${escape(`Day ${i + 1}`)}</name>\n    <desc>${segKm} km · ${segMin} min</desc>\n    <trkseg>\n${segPts}\n    </trkseg>\n  </trk>`
+    );
+    dayStartTime += 24 * 60 * 60 * 1000; // 24h gap between days
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Amble" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>${escape(trip.name)}</name>
+    <time>${new Date(trip.createdAt).toISOString()}</time>
+  </metadata>
+${wpts.join('\n')}
+${tracks.join('\n')}
+</gpx>`;
+}
+
+function downloadTripGpx() {
+  const gpx = buildTripGpx();
+  if (!gpx) { toast('No skeleton to export', 'red'); return; }
+  const safeName = (trip.name || 'amble-trip').replace(/[^a-z0-9\-_ ]/gi, '').replace(/\s+/g, '-').toLowerCase();
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${safeName}.gpx`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast('GPX downloaded ✓', 'green');
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function updateGenBtn() {
   const ready = trip.start && (trip.finish || trip.isLoop);
@@ -926,12 +1561,13 @@ function toast(msg, type = '') {
 
 function newTrip() {
   trip = newTripObj();
+  candidates = [];
+  activeCandidateIdx = 0;
   if (startMarker) { startMarker.remove(); startMarker = null; }
   if (finishMarker) { finishMarker.remove(); finishMarker = null; }
   dayEndMarkers.forEach(m => m.remove()); dayEndMarkers.length = 0;
   stopMarkers.forEach(m => m.marker.remove()); stopMarkers.length = 0;
   for (let i = 0; i < 14; i++) { const s = map.getSource(`seg${i}`); if (s) s.setData(emptyGJ()); }
-  // Reset UI
   document.getElementById('trip-name').value = '';
   document.getElementById('start-set').style.display = 'none';
   document.getElementById('start-search-wrap').style.display = 'block';
@@ -942,6 +1578,8 @@ function newTrip() {
   document.getElementById('finish-wrap').style.pointerEvents = '';
   document.getElementById('gen-err').textContent = '';
   document.getElementById('sync-msg').textContent = '';
+  document.getElementById('gpx-import-name').textContent = '';
+  document.getElementById('candidates-strip').style.display = 'none';
   goToStep(1); updateGenBtn();
 }
 
