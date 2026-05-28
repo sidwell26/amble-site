@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amble — Plan a multi-day trip</title>
+  <meta name="description" content="Plan your multi-day walking trip on the web. Syncs instantly to the Amble app on your phone.">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+  <!-- MapLibre GL JS -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <!-- Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+  <style>
+    /* ── Reset + base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    /* ── Theme (matches app dark theme) ──────────────────────────── */
+    :root {
+      --bg:           #0a0a0a;
+      --surface:      #141414;
+      --surface2:     #1e1e1e;
+      --border:       #2a2a2a;
+      --accent:       #a3e635;
+      --accent-dim:   #4d6e19;
+      --text:         #f5f5f5;
+      --text2:        #a3a3a3;
+      --text3:        #525252;
+      --red:          #ef4444;
+      --blue:         #3b82f6;
+      --amber:        #f59e0b;
+      --purple:       #a855f7;
+      --pink:         #ec4899;
+      --teal:         #14b8a6;
+    }
+
+    body { background: var(--bg); color: var(--text); }
+
+    /* ── Layout ───────────────────────────────────────────────────── */
+    .app { display: flex; flex-direction: column; height: 100vh; }
+
+    .topbar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 16px; height: 52px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      flex-shrink: 0; z-index: 10;
+    }
+    .topbar-brand { font-weight: 800; font-size: 18px; color: var(--accent); text-decoration: none; }
+    .topbar-title { font-size: 14px; font-weight: 600; color: var(--text2); flex: 1; }
+    .topbar-auth { display: flex; align-items: center; gap: 8px; }
+
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ──────────────────────────────────────────────────── */
+    .sidebar {
+      width: 340px; flex-shrink: 0;
+      background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow-y: auto;
+    }
+    .sidebar-section { padding: 16px; border-bottom: 1px solid var(--border); }
+    .sidebar-section:last-child { border-bottom: none; }
+    .section-title {
+      font-size: 11px; font-weight: 700; color: var(--text3);
+      letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 12px;
+    }
+
+    /* ── Map ──────────────────────────────────────────────────────── */
+    #map { flex: 1; }
+    .maplibregl-canvas { outline: none; }
+
+    /* ── Auth panel ───────────────────────────────────────────────── */
+    #auth-panel {
+      position: absolute; inset: 0;
+      background: rgba(10,10,10,0.92);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .auth-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 32px; width: 360px; max-width: 90vw;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .auth-logo { font-size: 32px; font-weight: 900; color: var(--accent); text-align: center; }
+    .auth-sub { font-size: 14px; color: var(--text2); text-align: center; line-height: 1.5; }
+    .auth-err { font-size: 13px; color: var(--red); text-align: center; min-height: 18px; }
+
+    /* ── Form controls ────────────────────────────────────────────── */
+    label { font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 4px; }
+    input[type=text], input[type=email], input[type=password], input[type=number], select {
+      width: 100%; padding: 10px 12px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-size: 14px;
+      outline: none;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    input[type=range] { width: 100%; accent-color: var(--accent); }
+
+    .btn {
+      padding: 12px 20px; border-radius: 8px; font-size: 14px;
+      font-weight: 700; border: none; cursor: pointer; transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-accent { background: var(--accent); color: #0a0a0a; width: 100%; }
+    .btn-outline {
+      background: transparent; color: var(--text2);
+      border: 1px solid var(--border); width: 100%;
+    }
+    .btn-small { padding: 8px 14px; font-size: 13px; }
+    .btn-red { background: var(--red); color: #fff; }
+
+    /* ── Step indicator ───────────────────────────────────────────── */
+    .steps { display: flex; gap: 4px; padding: 0 16px 12px; margin-top: 4px; }
+    .step {
+      flex: 1; height: 3px; border-radius: 2px;
+      background: var(--border); transition: background 0.2s;
+    }
+    .step.done { background: var(--accent); }
+    .step.active { background: var(--accent); opacity: 0.5; }
+
+    /* ── Trip name ────────────────────────────────────────────────── */
+    .trip-name-row { display: flex; gap: 8px; align-items: flex-end; }
+    .trip-name-row input { flex: 1; }
+
+    /* ── Endpoint rows ────────────────────────────────────────────── */
+    .endpoint-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; background: var(--surface2);
+      border-radius: 8px; border: 1px solid var(--border);
+      margin-bottom: 8px; cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .endpoint-row:hover, .endpoint-row.picking { border-color: var(--accent); }
+    .endpoint-dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 900; flex-shrink: 0;
+    }
+    .dot-start { background: var(--accent); color: #0a0a0a; }
+    .dot-end   { background: var(--red); color: #fff; }
+    .endpoint-label { flex: 1; font-size: 13px; color: var(--text2); }
+    .endpoint-label.set { color: var(--text); }
+    .endpoint-coords { font-size: 11px; color: var(--text3); }
+
+    /* ── Day count + km/day ───────────────────────────────────────── */
+    .stat-row { display: flex; gap: 8px; }
+    .stat-box { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .stat-box label { margin-bottom: 6px; }
+    .stat-value { font-size: 22px; font-weight: 800; color: var(--text); }
+    .stat-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+    /* ── Day-end list ─────────────────────────────────────────────── */
+    .day-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; background: var(--surface2);
+      border-radius: 8px; border: 1px solid var(--border);
+      margin-bottom: 6px;
+    }
+    .day-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .day-label { flex: 1; font-size: 13px; font-weight: 600; }
+    .day-km { font-size: 13px; color: var(--text2); }
+    .day-stop {
+      font-size: 11px; color: var(--text3); margin-top: 2px;
+      padding-left: 22px;
+    }
+
+    /* ── Pre-booked stops ─────────────────────────────────────────── */
+    .stop-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; background: var(--surface2);
+      border-radius: 8px; border: 1px solid var(--border);
+      margin-bottom: 6px;
+    }
+    .stop-row span { flex: 1; font-size: 13px; }
+    .stop-day { font-size: 11px; color: var(--text3); }
+
+    /* ── Toast ────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 20px;
+      font-size: 14px; font-weight: 600; color: var(--text);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      opacity: 0; pointer-events: none; transition: opacity 0.2s;
+      z-index: 200; white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
+    #toast.green { border-color: var(--accent); color: var(--accent); }
+    #toast.red   { border-color: var(--red); color: var(--red); }
+
+    /* ── Map pins / overlays ──────────────────────────────────────── */
+    .map-pin {
+      width: 32px; height: 32px; border-radius: 50%;
+      border: 3px solid #fff; display: flex; align-items: center;
+      justify-content: center; font-size: 11px; font-weight: 900;
+      cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .map-picking-hint {
+      position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+      background: rgba(10,10,10,0.85); color: var(--accent);
+      padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700;
+      pointer-events: none; z-index: 10; white-space: nowrap;
+    }
+
+    /* ── Sync result ──────────────────────────────────────────────── */
+    .sync-result {
+      font-size: 13px; color: var(--text2); text-align: center;
+      padding: 8px 0; min-height: 22px;
+    }
+    .sync-result.ok { color: var(--accent); }
+    .sync-result.err { color: var(--red); }
+
+    /* ── Scrollbar ────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .sidebar { width: 100%; height: 50vh; }
+      .main { flex-direction: column; }
+      #map { height: 50vh; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Auth overlay (shown until signed in) -->
+<div id="auth-panel">
+  <div class="auth-card">
+    <div class="auth-logo">Amble</div>
+    <p class="auth-sub">Sign in to plan your multi-day trip on the web, then sync it straight to your phone.</p>
+    <div>
+      <label for="auth-email">Email</label>
+      <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email">
+    </div>
+    <div>
+      <label for="auth-password">Password</label>
+      <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <p id="auth-err" class="auth-err"></p>
+    <button class="btn btn-accent" id="auth-signin-btn" onclick="signIn()">Sign in</button>
+    <button class="btn btn-outline" id="auth-signup-btn" onclick="signUp()">Create account</button>
+  </div>
+</div>
+
+<div class="app">
+  <!-- Top bar -->
+  <header class="topbar">
+    <a href="/" class="topbar-brand">Amble</a>
+    <span class="topbar-title">Multi-day trip planner</span>
+    <div class="topbar-auth">
+      <span id="user-email-display" style="font-size:12px;color:var(--text3)"></span>
+      <button class="btn btn-outline btn-small" onclick="signOut()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+
+      <!-- Step indicator -->
+      <div style="padding: 12px 16px 0">
+        <div class="steps" id="step-dots">
+          <div class="step active" id="step-1"></div>
+          <div class="step" id="step-2"></div>
+          <div class="step" id="step-3"></div>
+          <div class="step" id="step-4"></div>
+        </div>
+      </div>
+
+      <!-- Step 1: Basic info -->
+      <div class="sidebar-section" id="panel-1">
+        <div class="section-title">1 — Trip details</div>
+        <div style="margin-bottom:12px">
+          <label for="trip-name">Trip name</label>
+          <input type="text" id="trip-name" placeholder="e.g. Peak District 3-day">
+        </div>
+
+        <div style="margin-bottom:12px">
+          <label>Click the map to set start point</label>
+          <div class="endpoint-row" id="start-row" onclick="startPicking('start')">
+            <div class="endpoint-dot dot-start">S</div>
+            <div>
+              <div class="endpoint-label" id="start-label">Click to set start</div>
+              <div class="endpoint-coords" id="start-coords"></div>
+            </div>
+          </div>
+          <div class="endpoint-row" id="end-row" onclick="startPicking('end')">
+            <div class="endpoint-dot dot-end">F</div>
+            <div>
+              <div class="endpoint-label" id="end-label">Click to set finish</div>
+              <div class="endpoint-coords" id="end-coords"></div>
+            </div>
+          </div>
+          <label style="margin-bottom:6px;margin-top:4px">
+            <input type="checkbox" id="is-loop" style="width:auto;margin-right:6px" onchange="onLoopToggle()">
+            Loop trip (start = finish)
+          </label>
+        </div>
+
+        <div class="stat-row" style="margin-bottom:12px">
+          <div class="stat-box">
+            <label>Days</label>
+            <input type="number" id="day-count" min="1" max="14" value="3" style="font-size:22px;font-weight:800;padding:4px 8px" onchange="onDayCountChange()">
+            <div class="stat-sub">1 – 14</div>
+          </div>
+          <div class="stat-box">
+            <label>Target km/day</label>
+            <input type="number" id="km-day" min="3" max="40" value="15" style="font-size:22px;font-weight:800;padding:4px 8px">
+            <div class="stat-sub">3 – 40 km</div>
+          </div>
+        </div>
+
+        <button class="btn btn-accent" id="gen-skeleton-btn" onclick="generateSkeleton()" disabled>
+          Generate skeleton route
+        </button>
+      </div>
+
+      <!-- Step 2: Skeleton review -->
+      <div class="sidebar-section" id="panel-2" style="display:none">
+        <div class="section-title">2 — Route skeleton</div>
+        <div id="day-list" style="margin-bottom:12px"></div>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">
+          Drag the numbered markers on the map to move where each day ends.
+        </p>
+        <button class="btn btn-outline btn-small" onclick="regenerateSkeleton()" style="margin-bottom:8px;width:100%">
+          ↺ Regenerate
+        </button>
+        <button class="btn btn-accent" onclick="goToStep(3)">
+          Confirm skeleton →
+        </button>
+      </div>
+
+      <!-- Step 3: Pre-booked stops -->
+      <div class="sidebar-section" id="panel-3" style="display:none">
+        <div class="section-title">3 — Overnight stops (optional)</div>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:12px">
+          Click the map near a hotel, hostel or campsite to pin an overnight stop to a specific day.
+        </p>
+        <div id="stops-list" style="margin-bottom:12px"></div>
+        <button class="btn btn-outline btn-small" id="add-stop-btn" onclick="startPickingStop()" style="width:100%;margin-bottom:8px">
+          + Pin overnight stop
+        </button>
+        <button class="btn btn-accent" onclick="goToStep(4)">
+          Continue →
+        </button>
+      </div>
+
+      <!-- Step 4: Sync -->
+      <div class="sidebar-section" id="panel-4" style="display:none">
+        <div class="section-title">4 — Sync to phone</div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px" id="summary-name">—</div>
+          <div style="font-size:12px;color:var(--text2)" id="summary-stats">—</div>
+        </div>
+        <button class="btn btn-accent" onclick="syncToPhone()" id="sync-btn">
+          ☁  Sync to Amble on my phone
+        </button>
+        <p class="sync-result" id="sync-result"></p>
+        <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px;line-height:1.5">
+          Open Amble on your phone → Profile → sync icon to pull the latest trips.
+        </p>
+        <div style="height:1px;background:var(--border);margin:16px 0"></div>
+        <button class="btn btn-outline btn-small" onclick="goToStep(1);resetTrip()" style="width:100%">
+          + Plan another trip
+        </button>
+      </div>
+
+    </aside>
+
+    <!-- Map -->
+    <div id="map"></div>
+  </div>
+</div>
+
+<!-- Picking hint overlay -->
+<div class="map-picking-hint" id="picking-hint" style="display:none"></div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const SUPABASE_URL  = 'https://cygimxakzteygjeureqv.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_KPfqJPj4N5It7cy6y7DAZQ_8uIPQ0q8';
+const BROUTER_URL   = 'https://brouter.de/brouter';
+const MAP_STYLE     = 'https://tiles.openfreemap.org/styles/liberty';
+
+const DAY_COLORS = [
+  '#a3e635','#3b82f6','#f59e0b','#a855f7','#ec4899',
+  '#14b8a6','#f87171','#22c55e','#06b6d4','#fb923c',
+  '#84cc16','#e11d48','#7c3aed','#0ea5e9',
+];
+
+// ── Supabase ──────────────────────────────────────────────────────────────────
+const { createClient } = window.supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentStep = 1;
+let pickingMode = null; // 'start' | 'end' | 'stop'
+let stopPickingDayIndex = null;
+
+let trip = {
+  id: null,
+  name: '',
+  start: null,        // {latitude, longitude}
+  startLabel: '',
+  finish: null,
+  finishLabel: '',
+  isLoop: false,
+  targetDayCount: 3,
+  targetKmPerDay: 15,
+  vias: [],
+  skeleton: null,     // {coordinates, distanceMetres, dayEnds}
+  skeletonCandidates: [],
+  days: [],
+  masterRoute: null,
+  preBookedStops: [],
+  accomPreferences: [],
+  notes: '',
+  stage: 'frame',
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+// Skeleton day-end drag state
+let draggingDayEndIdx = null;
+
+// ── Map ───────────────────────────────────────────────────────────────────────
+const map = new maplibregl.Map({
+  container: 'map',
+  style: MAP_STYLE,
+  center: [-1.8, 53.5], // UK centre
+  zoom: 6,
+});
+map.addControl(new maplibregl.NavigationControl(), 'top-right');
+map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'top-right');
+
+let startMarker = null, endMarker = null;
+const dayEndMarkers = [];    // MapLibre Marker objects, one per day-end
+const stopMarkers = [];      // MapLibre Marker objects for pre-booked stops
+
+map.on('load', () => {
+  // Route layers for each day
+  for (let i = 0; i < 14; i++) {
+    map.addSource(`day-route-${i}`, { type: 'geojson', data: emptyGeoJSON() });
+    map.addLayer({
+      id: `day-route-line-${i}`,
+      type: 'line',
+      source: `day-route-${i}`,
+      paint: {
+        'line-color': DAY_COLORS[i % DAY_COLORS.length],
+        'line-width': 5,
+        'line-opacity': 0.9,
+      },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+    });
+  }
+});
+
+map.on('click', (e) => {
+  if (!pickingMode) return;
+  const { lng, lat } = e.lngLat;
+  const coord = { latitude: lat, longitude: lng };
+
+  if (pickingMode === 'start') {
+    trip.start = coord;
+    trip.startLabel = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    setMarker('start', lng, lat);
+    document.getElementById('start-label').textContent = trip.startLabel;
+    document.getElementById('start-label').classList.add('set');
+    document.getElementById('start-coords').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    document.getElementById('start-row').classList.remove('picking');
+    if (trip.isLoop) {
+      trip.finish = coord;
+      trip.finishLabel = trip.startLabel;
+    }
+  } else if (pickingMode === 'end') {
+    trip.finish = coord;
+    trip.finishLabel = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    setMarker('end', lng, lat);
+    document.getElementById('end-label').textContent = trip.finishLabel;
+    document.getElementById('end-label').classList.add('set');
+    document.getElementById('end-coords').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    document.getElementById('end-row').classList.remove('picking');
+  } else if (pickingMode === 'stop') {
+    addPreBookedStop(coord, stopPickingDayIndex);
+    stopPickingDayIndex = null;
+  }
+
+  pickingMode = null;
+  document.getElementById('picking-hint').style.display = 'none';
+  map.getCanvas().style.cursor = '';
+  updateGenBtn();
+});
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function checkSession() {
+  const { data } = await sb.auth.getSession();
+  if (data.session) {
+    onSignedIn(data.session.user);
+  }
+}
+
+function onSignedIn(user) {
+  document.getElementById('auth-panel').style.display = 'none';
+  document.getElementById('user-email-display').textContent = user.email;
+  trip.id = trip.id || crypto.randomUUID();
+}
+
+async function signIn() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  document.getElementById('auth-err').textContent = '';
+  setBtnLoading('auth-signin-btn', true);
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  setBtnLoading('auth-signin-btn', false);
+  if (error) {
+    document.getElementById('auth-err').textContent = error.message;
+    return;
+  }
+  onSignedIn(data.user);
+}
+
+async function signUp() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  document.getElementById('auth-err').textContent = '';
+  setBtnLoading('auth-signup-btn', true);
+  const { data, error } = await sb.auth.signUp({ email, password });
+  setBtnLoading('auth-signup-btn', false);
+  if (error) {
+    document.getElementById('auth-err').textContent = error.message;
+    return;
+  }
+  if (data.user && !data.session) {
+    document.getElementById('auth-err').style.color = 'var(--accent)';
+    document.getElementById('auth-err').textContent = 'Check your email to confirm your account, then sign in.';
+    return;
+  }
+  if (data.session) onSignedIn(data.user);
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  document.getElementById('auth-panel').style.display = 'flex';
+  document.getElementById('user-email-display').textContent = '';
+}
+
+// ── Step navigation ───────────────────────────────────────────────────────────
+function goToStep(n) {
+  currentStep = n;
+  for (let i = 1; i <= 4; i++) {
+    const panel = document.getElementById(`panel-${i}`);
+    const dot   = document.getElementById(`step-${i}`);
+    panel.style.display = i === n ? 'block' : 'none';
+    dot.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
+  }
+  if (n === 4) updateSummary();
+}
+
+// ── Markers ───────────────────────────────────────────────────────────────────
+function makePin(letter, bg, fg = '#0a0a0a') {
+  const el = document.createElement('div');
+  el.className = 'map-pin';
+  el.style.background = bg;
+  el.style.color = fg;
+  el.textContent = letter;
+  return el;
+}
+
+function setMarker(which, lng, lat) {
+  if (which === 'start') {
+    if (startMarker) startMarker.remove();
+    startMarker = new maplibregl.Marker({ element: makePin('S', '#a3e635') })
+      .setLngLat([lng, lat]).addTo(map);
+  } else {
+    if (endMarker) endMarker.remove();
+    endMarker = new maplibregl.Marker({ element: makePin('F', '#ef4444', '#fff') })
+      .setLngLat([lng, lat]).addTo(map);
+  }
+}
+
+function clearDayEndMarkers() {
+  dayEndMarkers.forEach(m => m.remove());
+  dayEndMarkers.length = 0;
+}
+
+function placeDayEndMarkers() {
+  clearDayEndMarkers();
+  if (!trip.skeleton) return;
+  const { coordinates, dayEnds } = trip.skeleton;
+  dayEnds.forEach((de, i) => {
+    const coord = de.kind === 'pinned' ? de.coord : coordinates[de.index];
+    if (!coord) return;
+    const color = DAY_COLORS[i % DAY_COLORS.length];
+    const el = makePin(String(i + 1), '#0a0a0a', color);
+    el.style.border = `3px solid ${color}`;
+    el.style.cursor = 'grab';
+    const marker = new maplibregl.Marker({ element: el, draggable: true })
+      .setLngLat([coord.longitude, coord.latitude])
+      .addTo(map);
+    // On drag end, snap to nearest polyline vertex
+    marker.on('dragend', () => {
+      const lngLat = marker.getLngLat();
+      const nearestIdx = nearestVertexIndex(coordinates, lngLat.lat, lngLat.lng);
+      const nearestCoord = coordinates[nearestIdx];
+      marker.setLngLat([nearestCoord.longitude, nearestCoord.latitude]);
+      trip.skeleton.dayEnds[i] = { kind: 'cut', index: nearestIdx };
+      trip.updatedAt = new Date().toISOString();
+      renderDayList();
+      renderSkeletonOnMap();
+    });
+    dayEndMarkers.push(marker);
+  });
+}
+
+// ── Picking mode ──────────────────────────────────────────────────────────────
+function startPicking(which) {
+  pickingMode = which;
+  const hint = document.getElementById('picking-hint');
+  hint.textContent = which === 'start' ? '🟢 Click map to set start point' : '🔴 Click map to set finish point';
+  hint.style.display = 'block';
+  map.getCanvas().style.cursor = 'crosshair';
+  document.getElementById(which === 'start' ? 'start-row' : 'end-row').classList.add('picking');
+  if (which === 'end') document.getElementById('end-row').classList.add('picking');
+}
+
+function startPickingStop() {
+  const n = parseInt(document.getElementById('day-count').value, 10);
+  // Ask which day
+  const day = prompt(`Pin overnight stop to which day? (1 – ${n - 1}, night after that day)`, '1');
+  if (!day) return;
+  const dayIdx = parseInt(day, 10) - 1;
+  if (isNaN(dayIdx) || dayIdx < 0 || dayIdx >= n - 1) {
+    toast('Enter a day between 1 and ' + (n - 1), 'red'); return;
+  }
+  stopPickingDayIndex = dayIdx;
+  pickingMode = 'stop';
+  const hint = document.getElementById('picking-hint');
+  hint.textContent = `📍 Click map to pin overnight stop after Day ${dayIdx + 1}`;
+  hint.style.display = 'block';
+  map.getCanvas().style.cursor = 'crosshair';
+}
+
+// ── Skeleton generation ───────────────────────────────────────────────────────
+async function generateSkeleton() {
+  if (!trip.start || !trip.finish) return;
+  trip.name = document.getElementById('trip-name').value.trim() || 'My trip';
+  trip.targetDayCount = parseInt(document.getElementById('day-count').value, 10);
+  trip.targetKmPerDay = parseInt(document.getElementById('km-day').value, 10);
+  trip.isLoop = document.getElementById('is-loop').checked;
+
+  setBtnLoading('gen-skeleton-btn', true);
+  try {
+    const coords = await routeViaBRouter(trip.start, trip.finish);
+    if (!coords || coords.length < 2) throw new Error('No route found between these points');
+
+    const totalMetres = calcTotalDistance(coords);
+    const dayEnds = buildEqualDayEnds(coords, trip.targetDayCount);
+
+    trip.skeleton = { coordinates: coords, distanceMetres: totalMetres, dayEnds };
+    trip.stage = 'skeleton';
+    trip.updatedAt = new Date().toISOString();
+
+    renderSkeletonOnMap();
+    placeDayEndMarkers();
+    renderDayList();
+    fitMapToCoords(coords);
+    goToStep(2);
+  } catch (e) {
+    toast('Could not generate route: ' + e.message, 'red');
+  }
+  setBtnLoading('gen-skeleton-btn', false);
+}
+
+async function regenerateSkeleton() {
+  setBtnLoading('gen-skeleton-btn', true);
+  await generateSkeleton();
+}
+
+// ── BRouter routing ───────────────────────────────────────────────────────────
+async function routeViaBRouter(start, finish) {
+  // BRouter HTTP API — free, no key, hiking profile
+  const lonlats = `${start.longitude},${start.latitude}|${finish.longitude},${finish.latitude}`;
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`);
+  const gj = await res.json();
+  const feature = gj.features?.[0];
+  if (!feature) throw new Error('No route in BRouter response');
+  return feature.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+}
+
+// ── Skeleton helpers ──────────────────────────────────────────────────────────
+function calcTotalDistance(coords) {
+  let d = 0;
+  for (let i = 1; i < coords.length; i++) d += haversineMetres(coords[i - 1], coords[i]);
+  return d;
+}
+
+function haversineMetres(a, b) {
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function buildCumDist(coords) {
+  const out = [0];
+  for (let i = 1; i < coords.length; i++) out.push(out[i-1] + haversineMetres(coords[i-1], coords[i]));
+  return out;
+}
+
+function buildEqualDayEnds(coords, days) {
+  const cum = buildCumDist(coords);
+  const total = cum[cum.length - 1];
+  const ends = [];
+  for (let d = 1; d < days; d++) {
+    const target = (d / days) * total;
+    let best = 1;
+    for (let i = 1; i < cum.length; i++) {
+      if (cum[i] >= target) { best = i; break; }
+    }
+    ends.push({ kind: 'cut', index: best });
+  }
+  return ends;
+}
+
+function nearestVertexIndex(coords, lat, lng) {
+  let best = 0, bestDist = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    const dx = coords[i].longitude - lng, dy = coords[i].latitude - lat;
+    const d = dx*dx + dy*dy;
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return best;
+}
+
+// ── Render skeleton on map ────────────────────────────────────────────────────
+function renderSkeletonOnMap() {
+  if (!trip.skeleton || !map.isStyleLoaded()) return;
+  const { coordinates, dayEnds } = trip.skeleton;
+  const n = trip.targetDayCount;
+  const boundaries = [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestVertexIndex(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
+
+  for (let i = 0; i < 14; i++) {
+    const src = map.getSource(`day-route-${i}`);
+    if (!src) continue;
+    if (i < n) {
+      const slice = coordinates.slice(boundaries[i], boundaries[i+1] + 1);
+      src.setData({
+        type: 'Feature', properties: {},
+        geometry: { type: 'LineString', coordinates: slice.map(c => [c.longitude, c.latitude]) },
+      });
+    } else {
+      src.setData(emptyGeoJSON());
+    }
+  }
+}
+
+function emptyGeoJSON() {
+  return { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } };
+}
+
+// ── Day list (sidebar) ────────────────────────────────────────────────────────
+function renderDayList() {
+  if (!trip.skeleton) return;
+  const { coordinates, dayEnds } = trip.skeleton;
+  const cum = buildCumDist(coordinates);
+  const total = cum[cum.length - 1];
+  const n = trip.targetDayCount;
+  const boundaries = [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestVertexIndex(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
+
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    const km = ((cum[boundaries[i+1]] - cum[boundaries[i]]) / 1000).toFixed(1);
+    const color = DAY_COLORS[i % DAY_COLORS.length];
+    const stop = trip.preBookedStops.find(s => s.dayIndex === i);
+    html += `<div class="day-row">
+      <div class="day-dot" style="background:${color}"></div>
+      <div style="flex:1">
+        <div class="day-label">Day ${i+1}</div>
+        ${stop ? `<div class="day-stop">🏨 ${stop.name}</div>` : ''}
+      </div>
+      <div class="day-km">${km} km</div>
+    </div>`;
+  }
+  document.getElementById('day-list').innerHTML = html;
+}
+
+// ── Pre-booked stops ──────────────────────────────────────────────────────────
+async function addPreBookedStop(coord, dayIndex) {
+  pickingMode = null;
+  document.getElementById('picking-hint').style.display = 'none';
+  map.getCanvas().style.cursor = '';
+
+  // Reverse geocode with Nominatim
+  let name = `Stop (Day ${dayIndex + 1})`;
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`);
+    const j = await res.json();
+    name = j.name || j.display_name?.split(',')[0] || name;
+  } catch { /* ignore */ }
+
+  const id = crypto.randomUUID();
+  trip.preBookedStops.push({ id, coord, name, dayIndex });
+  trip.updatedAt = new Date().toISOString();
+
+  // Place marker on map
+  const el = document.createElement('div');
+  el.innerHTML = '🏨';
+  el.style.cssText = 'font-size:24px;cursor:pointer';
+  const m = new maplibregl.Marker({ element: el }).setLngLat([coord.longitude, coord.latitude]).addTo(map);
+  stopMarkers.push({ marker: m, id });
+
+  renderStopList();
+  renderDayList();
+  toast(`Pinned: ${name}`, 'green');
+}
+
+function renderStopList() {
+  const list = document.getElementById('stops-list');
+  if (trip.preBookedStops.length === 0) {
+    list.innerHTML = '<p style="font-size:12px;color:var(--text3)">No stops pinned yet</p>';
+    return;
+  }
+  list.innerHTML = trip.preBookedStops.map(s =>
+    `<div class="stop-row">
+      <span>🏨 ${s.name}</span>
+      <span class="stop-day">after Day ${s.dayIndex + 1}</span>
+      <button class="btn btn-outline btn-small" style="padding:4px 8px" onclick="removeStop('${s.id}')">✕</button>
+    </div>`
+  ).join('');
+}
+
+function removeStop(id) {
+  const idx = trip.preBookedStops.findIndex(s => s.id === id);
+  if (idx === -1) return;
+  trip.preBookedStops.splice(idx, 1);
+  const mi = stopMarkers.findIndex(m => m.id === id);
+  if (mi !== -1) { stopMarkers[mi].marker.remove(); stopMarkers.splice(mi, 1); }
+  renderStopList();
+  renderDayList();
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────────
+function updateSummary() {
+  document.getElementById('summary-name').textContent = trip.name || 'Unnamed trip';
+  const km = trip.skeleton ? (trip.skeleton.distanceMetres / 1000).toFixed(1) : '?';
+  document.getElementById('summary-stats').textContent =
+    `${trip.targetDayCount} days · ${km} km total · ${trip.preBookedStops.length} stops pinned`;
+}
+
+// ── Sync ──────────────────────────────────────────────────────────────────────
+async function syncToPhone() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { toast('Not signed in', 'red'); return; }
+  const userId = session.user.id;
+
+  setBtnLoading('sync-btn', true);
+  document.getElementById('sync-result').textContent = '';
+  document.getElementById('sync-result').className = 'sync-result';
+
+  trip.updatedAt = new Date().toISOString();
+  trip.stage = 'skeleton'; // lands on skeleton-review step in the app
+
+  const row = {
+    id: trip.id,
+    user_id: userId,
+    data: trip,
+    updated_at: trip.updatedAt,
+  };
+
+  const { error } = await sb.from('cloud_trips').upsert(row, { onConflict: 'id,user_id' });
+  setBtnLoading('sync-btn', false);
+
+  if (error) {
+    document.getElementById('sync-result').textContent = '✕ Sync failed: ' + error.message;
+    document.getElementById('sync-result').className = 'sync-result err';
+    toast('Sync failed', 'red');
+  } else {
+    document.getElementById('sync-result').textContent = '✓ Synced! Pull on your phone to load.';
+    document.getElementById('sync-result').className = 'sync-result ok';
+    toast('Synced to cloud ✓', 'green');
+  }
+}
+
+// ── Map fit ───────────────────────────────────────────────────────────────────
+function fitMapToCoords(coords) {
+  if (!coords || coords.length === 0) return;
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const c of coords) {
+    if (c.latitude < minLat) minLat = c.latitude;
+    if (c.latitude > maxLat) maxLat = c.latitude;
+    if (c.longitude < minLng) minLng = c.longitude;
+    if (c.longitude > maxLng) maxLng = c.longitude;
+  }
+  map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800 });
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function updateGenBtn() {
+  const ready = trip.start && (trip.finish || trip.isLoop) && trip.id;
+  document.getElementById('gen-skeleton-btn').disabled = !ready;
+}
+
+function onDayCountChange() {
+  trip.targetDayCount = parseInt(document.getElementById('day-count').value, 10);
+}
+
+function onLoopToggle() {
+  trip.isLoop = document.getElementById('is-loop').checked;
+  const endRow = document.getElementById('end-row');
+  endRow.style.opacity = trip.isLoop ? '0.4' : '1';
+  endRow.style.pointerEvents = trip.isLoop ? 'none' : '';
+  if (trip.isLoop && trip.start) {
+    trip.finish = trip.start;
+    trip.finishLabel = trip.startLabel;
+  }
+  updateGenBtn();
+}
+
+function setBtnLoading(id, loading) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.disabled = loading;
+  btn._origText = btn._origText || btn.textContent;
+  btn.textContent = loading ? '…' : btn._origText;
+}
+
+function resetTrip() {
+  trip = {
+    id: crypto.randomUUID(),
+    name: '', start: null, startLabel: '', finish: null, finishLabel: '',
+    isLoop: false, targetDayCount: 3, targetKmPerDay: 15,
+    vias: [], skeleton: null, skeletonCandidates: [], days: [],
+    masterRoute: null, preBookedStops: [], accomPreferences: [], notes: '',
+    stage: 'frame',
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  };
+  if (startMarker) { startMarker.remove(); startMarker = null; }
+  if (endMarker)   { endMarker.remove();   endMarker = null; }
+  clearDayEndMarkers();
+  stopMarkers.forEach(m => m.marker.remove()); stopMarkers.length = 0;
+  for (let i = 0; i < 14; i++) {
+    const src = map.getSource(`day-route-${i}`);
+    if (src) src.setData(emptyGeoJSON());
+  }
+  document.getElementById('trip-name').value = '';
+  document.getElementById('start-label').textContent = 'Click to set start';
+  document.getElementById('start-label').classList.remove('set');
+  document.getElementById('end-label').textContent = 'Click to set finish';
+  document.getElementById('end-label').classList.remove('set');
+  document.getElementById('start-coords').textContent = '';
+  document.getElementById('end-coords').textContent = '';
+  updateGenBtn();
+}
+
+let toastTimer = null;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type ? ' ' + type : '');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+checkSession();
+trip.id = crypto.randomUUID();
+</script>
+</body>
+</html>
