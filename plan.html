@@ -176,6 +176,97 @@
     }
     .stop-row-name { flex: 1; font-size: 13px; }
     .stop-row-day { font-size: 11px; color: var(--text3); }
+    /* Sleep picker */
+    .sleep-night-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .sleep-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .sleep-night-label { font-size: 12px; font-weight: 700; color: var(--text2); flex: 1; }
+    .accom-card {
+      display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s;
+    }
+    .accom-card:hover { border-color: var(--accent); }
+    .accom-card.picked { border-color: var(--accent); background: rgba(163,230,53,0.06); }
+    .accom-emoji { font-size: 20px; line-height: 1; flex-shrink: 0; }
+    .accom-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .accom-dist { font-size: 11px; color: var(--text3); margin-top: 2px; }
+    .accom-loading { font-size: 12px; color: var(--text3); padding: 8px 0; display: flex; align-items: center; gap: 6px; }
+    /* Per-day route picker */
+    .day-picker-header {
+      display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .day-picker-back { font-size: 13px; font-weight: 700; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; }
+    .day-picker-title { flex: 1; font-size: 14px; font-weight: 700; color: var(--text); text-align: center; }
+    .day-picker-nav { font-size: 13px; color: var(--text3); font-weight: 600; }
+    .alt-card {
+      background: var(--surface2); border: 1.5px solid var(--border); border-radius: 10px;
+      padding: 12px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s;
+    }
+    .alt-card:hover { border-color: var(--text2); }
+    .alt-card.selected { border-color: var(--alt-color, var(--accent)); }
+    .alt-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .alt-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .alt-label { flex: 1; font-size: 14px; font-weight: 700; color: var(--text); }
+    .alt-feel-badge {
+      font-size: 10px; font-weight: 700; color: var(--text2); background: var(--surface);
+      border-radius: 999px; padding: 2px 8px; letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .alt-stats { display: flex; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+    .alt-stat { flex: 1; padding: 6px 4px; text-align: center; border-right: 1px solid var(--border); }
+    .alt-stat:last-child { border-right: none; }
+    .alt-stat-val { font-size: 13px; font-weight: 800; color: var(--text); }
+    .alt-stat-lbl { font-size: 9px; font-weight: 700; color: var(--text3); letter-spacing: 0.6px; text-transform: uppercase; }
+    .alt-surface { font-size: 11px; color: var(--text3); text-align: center; margin-bottom: 6px; }
+    .sparkline-wrap { width: 100%; height: 32px; position: relative; overflow: hidden; }
+    .sparkline-placeholder { width: 100%; height: 32px; background: var(--surface); border-radius: 4px; opacity: 0.5; }
+    /* POI filter chips */
+    .poi-chip-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    .poi-chip {
+      flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+      padding: 6px 6px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+      font-size: 11px; font-weight: 700; color: var(--text2);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .poi-chip.on { color: #fff; }
+    .poi-chip-badge {
+      min-width: 16px; height: 16px; border-radius: 8px; background: var(--border);
+      font-size: 9px; font-weight: 800; color: var(--text3);
+      display: flex; align-items: center; justify-content: center; padding: 0 3px;
+    }
+    .poi-chip.on .poi-chip-badge { background: rgba(255,255,255,0.3); color: #fff; }
+    /* Waypoint toggle */
+    .waypoint-toggle {
+      width: 100%; padding: 9px 14px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+      font-size: 12px; font-weight: 700; color: var(--text2); text-align: center;
+      margin-bottom: 8px; transition: background 0.15s, color 0.15s;
+    }
+    .waypoint-toggle.on { background: var(--accent); color: #0a0a0a; border-color: var(--accent); }
+    /* Pick button */
+    .pick-btn {
+      width: 100%; padding: 14px; background: var(--accent);
+      border: none; border-radius: 8px; font-size: 14px; font-weight: 700;
+      color: #0a0a0a; cursor: pointer; margin-top: 8px;
+    }
+    .pick-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Replan overlay on map */
+    .replan-overlay {
+      position: absolute; inset: 0; background: rgba(10,10,10,0.65);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; z-index: 10; pointer-events: none;
+    }
+    .replan-overlay-text { font-size: 13px; font-weight: 600; color: #fff; }
+    /* Custom waypoint pin */
+    .custom-wp-pin {
+      width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+      border: 2.5px solid #fff; display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 900; color: #0a0a0a; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    }
     /* Stats row */
     .stats-row { display: flex; gap: 0; margin-bottom: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
     .stats-cell { flex: 1; padding: 10px 8px; text-align: center; border-right: 1px solid var(--border); }
@@ -264,6 +355,7 @@
       <div class="steps">
         <div class="step active" id="s1"></div>
         <div class="step" id="s2"></div>
+        <div class="step" id="s25"></div>
         <div class="step" id="s3"></div>
         <div class="step" id="s4"></div>
       </div>
@@ -370,32 +462,32 @@
           </p>
           <button class="btn btn-outline btn-sm" onclick="goBack()" style="width:100%;margin-bottom:8px">‹ Change start / finish</button>
           <button class="btn btn-outline btn-sm" onclick="regenerate()" style="width:100%;margin-bottom:8px">↺ Regenerate candidates</button>
-          <button class="btn btn-accent" onclick="goToStep(3)">Confirm skeleton →</button>
+          <button class="btn btn-accent" onclick="confirmSkeleton()">Confirm skeleton →</button>
         </div>
       </div>
 
-      <!-- Panel 3: Stops -->
-      <div class="sidebar-section" id="p3" style="display:none">
-        <div class="section-title">3 — Overnight stops (optional)</div>
-        <p style="font-size:12px;color:var(--text3);margin-bottom:10px">
-          Pin hotel, hostel or campsite stops. Search by name or click the map.
-        </p>
-        <div id="stops-list" style="margin-bottom:10px"></div>
-        <div style="margin-bottom:8px">
-          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" id="stop-day-row" style="display:none">
-            <span style="font-size:12px;color:var(--text2)">After day</span>
-            <input type="number" id="stop-day-input" min="1" max="13" value="1" style="width:60px;padding:6px 8px;font-size:14px">
-            <span id="stop-day-max" style="font-size:11px;color:var(--text3)"></span>
-          </div>
-          <div class="place-wrap" id="stop-search-wrap" style="display:none">
-            <input type="text" id="stop-input" placeholder="Search for accommodation…" autocomplete="off"
-              oninput="onStopInput()" onkeydown="onStopKey(event)">
-            <button class="place-clear" id="stop-clear" onclick="clearStopInput()">×</button>
-            <div class="place-results" id="stop-results"></div>
-          </div>
+      <!-- Panel 2.5: Sleep picker -->
+      <div id="p25" style="display:none">
+        <div class="day-picker-header">
+          <button class="day-picker-back" onclick="goToStep(2)">‹ Skeleton</button>
+          <div class="day-picker-title">Overnight stops</div>
+          <div class="day-picker-nav" id="sleep-nav"></div>
         </div>
-        <button class="btn btn-outline btn-sm" id="add-stop-btn" onclick="showStopSearch()" style="width:100%;margin-bottom:8px">+ Add overnight stop</button>
-        <button class="btn btn-accent" onclick="goToStep(4)">Continue →</button>
+        <div style="padding:0 16px 16px;overflow-y:auto;flex:1" id="sleep-body">
+          <!-- filled by renderSleepStep() -->
+        </div>
+      </div>
+
+      <!-- Panel 3: Per-day route picker -->
+      <div id="p3" style="display:none">
+        <div class="day-picker-header">
+          <button class="day-picker-back" id="day-picker-back-btn" onclick="dayPickerBack()">‹ Back</button>
+          <div class="day-picker-title" id="day-picker-title">Day 1</div>
+          <div class="day-picker-nav" id="day-picker-nav"></div>
+        </div>
+        <div style="padding:12px 16px;overflow-y:auto" id="day-picker-body">
+          <!-- filled by renderDayPicker() -->
+        </div>
       </div>
 
       <!-- Panel 4: Sync -->
@@ -405,10 +497,11 @@
           <div style="font-size:14px;font-weight:700;margin-bottom:4px" id="sum-name">—</div>
           <div style="font-size:12px;color:var(--text2)" id="sum-stats">—</div>
         </div>
+        <div id="day-summary-list" style="margin-bottom:12px"></div>
         <button class="btn btn-accent" id="sync-btn" onclick="syncToPhone()">☁ Sync to Amble on my phone</button>
         <div class="sync-msg" id="sync-msg"></div>
         <p style="font-size:11px;color:var(--text3);text-align:center;line-height:1.5;margin-top:6px">
-          On your phone: Profile → pull-to-refresh or sync icon. The trip will appear in your multi-day planner ready to review.
+          On your phone: open Amble → Multi-day → pull to refresh. The trip will be ready to walk straight away.
         </p>
         <div class="gpx-divider" style="margin:14px 0 2px">
           <div class="gpx-divider-line"></div>
@@ -493,8 +586,13 @@ map.on('load', () => {
 });
 
 map.on('click', e => {
-  if (!pickingMode) return;
   const { lng, lat } = e.lngLat;
+  // Waypoint mode takes precedence (used during day picker step)
+  if (waypointMode) {
+    onMapTapWaypoint(lat, lng);
+    return;
+  }
+  if (!pickingMode) return;
   const coord = { latitude: lat, longitude: lng };
   const label = `${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°${lng < 0 ? 'W' : 'E'}`;
   if (pickingMode === 'start') setPlace('start', coord, label);
@@ -533,19 +631,6 @@ async function signOut() {
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
 let currentStep = 1;
-function goToStep(n) {
-  currentStep = n;
-  document.getElementById('p1').style.display = n === 1 ? 'block' : 'none';
-  document.getElementById('p2').style.display = n === 2 ? 'block' : 'none';
-  document.getElementById('p3').style.display = n === 3 ? 'block' : 'none';
-  document.getElementById('p4').style.display = n === 4 ? 'block' : 'none';
-  ['s1','s2','s3','s4'].forEach((id, i) => {
-    document.getElementById(id).className = 'step' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
-  });
-  if (n === 3) renderStopList();
-  if (n === 4) renderSummary();
-}
-function goBack() { goToStep(1); }
 
 // ── Place search (Nominatim) ──────────────────────────────────────────────────
 let searchTimers = { start: null, finish: null, stop: null };
@@ -881,6 +966,21 @@ async function generateSkeleton() {
       }
     });
 
+    // Greenery scoring via Overpass (async, updates pill labels when done)
+    if (candidates.length > 1) {
+      scoreAllCandidates(candidates).then(() => {
+        // Update trip.skeletonCandidates with scored fractions
+        trip.skeletonCandidates = candidates.map(c => ({
+          skeleton: c.skeleton,
+          dayEnds: c.skeleton.dayEnds.map(de => c.skeleton.coordinates[de.index]),
+          bearingDeg: c.bearing,
+          greeneryFraction: c.greeneryFraction,
+          label: c.label,
+        }));
+        renderCandidateStrip();
+      }).catch(() => {}); // graceful failure — labels stay as compass bearings
+    }
+
     // Activate first candidate
     activeCandidateIdx = 0;
     applyCandidate(0);
@@ -940,12 +1040,14 @@ function renderCandidateStrip() {
   const strip = document.getElementById('candidates-strip');
   if (candidates.length <= 1) { strip.style.display = 'none'; return; }
   strip.style.display = 'flex';
-  strip.innerHTML = candidates.map((c, i) =>
-    `<div class="candidate-pill${i === 0 ? ' active' : ''}" id="cpill-${i}" onclick="selectCandidate(${i})">
+  strip.innerHTML = candidates.map((c, i) => {
+    const naturePct = Math.round((c.greeneryFraction || 0) * 100);
+    const sub = naturePct > 0 ? `${c.kmTotal} km · ${naturePct}% nature` : `${c.kmTotal} km`;
+    return `<div class="candidate-pill${i === activeCandidateIdx ? ' active' : ''}" id="cpill-${i}" onclick="selectCandidate(${i})">
       <div class="cpill-label">${c.label}</div>
-      <div class="cpill-sub">${c.kmTotal} km</div>
-    </div>`
-  ).join('');
+      <div class="cpill-sub">${sub}</div>
+    </div>`;
+  }).join('');
 }
 
 function selectCandidate(idx) {
@@ -1239,9 +1341,34 @@ function removeStop(id) {
 // ── Summary & sync ────────────────────────────────────────────────────────────
 function renderSummary() {
   document.getElementById('sum-name').textContent = trip.name || 'Unnamed trip';
-  const km = trip.skeleton ? (trip.skeleton.distanceMetres / 1000).toFixed(1) : '?';
+  const totalKm = trip.masterRoute
+    ? (trip.masterRoute.distanceMetres / 1000).toFixed(1)
+    : trip.skeleton ? (trip.skeleton.distanceMetres / 1000).toFixed(1) : '?';
+  const stopsCount = trip.days.filter(d => d.accommodation).length;
   document.getElementById('sum-stats').textContent =
-    `${trip.targetDayCount} days · ${km} km total · ${trip.preBookedStops.length} overnight stop${trip.preBookedStops.length !== 1 ? 's' : ''}`;
+    `${trip.targetDayCount} days · ${totalKm} km total` +
+    (stopsCount ? ` · ${stopsCount} overnight stop${stopsCount !== 1 ? 's' : ''}` : '');
+
+  // Per-day summary list
+  const listEl = document.getElementById('day-summary-list');
+  if (!listEl) return;
+  if (trip.days && trip.days.length > 0) {
+    listEl.innerHTML = trip.days.map((d, i) => {
+      const km = d.route ? (d.route.distanceMetres/1000).toFixed(1) : '?';
+      const color = DAY_COLORS[i % DAY_COLORS.length];
+      const sleep = d.accommodation ? `🏨 ${d.accommodation.name}` : '';
+      return `<div class="day-row" style="margin-bottom:4px">
+        <div class="day-dot" style="background:${color}"></div>
+        <div style="flex:1">
+          <div class="day-label">Day ${i+1}</div>
+          ${sleep ? `<div class="day-stop">${sleep}</div>` : ''}
+        </div>
+        <div class="day-km">${km} km</div>
+      </div>`;
+    }).join('');
+  } else {
+    listEl.innerHTML = '';
+  }
 }
 
 async function syncToPhone() {
@@ -1250,8 +1377,14 @@ async function syncToPhone() {
   setLoading('sync-btn', true);
   const msg = document.getElementById('sync-msg');
   msg.textContent = ''; msg.className = 'sync-msg';
+
+  // Ensure trip is walkable: if per-day picker wasn't completed, build days from
+  // skeleton segments so the phone can walk each day without further planning.
+  if (trip.stage !== 'complete' || !trip.masterRoute || !trip.days.length) {
+    ensureTripComplete();
+  }
+
   trip.updatedAt = new Date().toISOString();
-  trip.stage = 'skeleton';
   const { error } = await sb.from('cloud_trips').upsert(
     { id: trip.id, user_id: session.user.id, data: trip, updated_at: trip.updatedAt },
     { onConflict: 'id,user_id' }
@@ -1261,9 +1394,59 @@ async function syncToPhone() {
     msg.textContent = '✕ ' + error.message; msg.className = 'sync-msg err';
     toast('Sync failed', 'red');
   } else {
-    msg.textContent = '✓ Synced! Open Amble on your phone and pull to refresh.'; msg.className = 'sync-msg ok';
+    msg.textContent = '✓ Synced! Open Amble on your phone → pull to refresh → ready to walk.';
+    msg.className = 'sync-msg ok';
     toast('Synced ✓', 'green');
   }
+}
+
+// Build trip.days and trip.masterRoute from skeleton segments when the per-day
+// picker hasn't been used. Makes the trip walkable on the phone immediately.
+function ensureTripComplete() {
+  if (!trip.skeleton) return;
+  const b = boundaries(trip.skeleton);
+  const coords = trip.skeleton.coordinates;
+  const n = trip.targetDayCount;
+  const days = [];
+  for (let i = 0; i < n; i++) {
+    // Use picked route if available, else skeleton segment
+    if (dayRoutes[i]) {
+      days.push(buildTripDay(i, dayRoutes[i]));
+      continue;
+    }
+    const segCoords = coords.slice(b[i], b[i + 1] + 1);
+    const dist = totalDist(segCoords);
+    const route = {
+      id: crypto.randomUUID(),
+      name: `Day ${i + 1}`,
+      coordinates: segCoords,
+      steps: [],
+      distanceMetres: dist,
+      durationMinutes: Math.round(dist / 1000 / WALK_SPEED_KMH * 60),
+      createdAt: new Date().toISOString(),
+      saved: false,
+      seed: -1,
+      mode: trip.isLoop ? 'loop' : 'out-and-back',
+      viaPoint: null,
+      viaLabel: null,
+      rating: null,
+    };
+    const sleep = sleepPicks[i];
+    const accommodation = (sleep && sleep !== 'skip')
+      ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
+      : null;
+    days.push({
+      id: crypto.randomUUID(),
+      start: coords[b[i]],
+      end: coords[b[i + 1]],
+      route,
+      accommodation,
+      alts: { picked: route, options: [] },
+    });
+  }
+  trip.days = days;
+  trip.masterRoute = compileMasterRoute(days);
+  trip.stage = 'complete';
 }
 
 // ── GPX import ────────────────────────────────────────────────────────────────
@@ -1488,13 +1671,12 @@ function buildTripGpx() {
     return `  <wpt lat="${coord.latitude.toFixed(7)}" lon="${coord.longitude.toFixed(7)}">\n    <name>${escape(wptName)}</name>\n    <sym>Campground</sym>\n  </wpt>`;
   }).filter(Boolean);
 
-  // One <trk> per day — use the skeleton segments (web planner doesn't run per-day
-  // route refinement, so we always use the skeleton polyline, same as the native
-  // "no day routes yet" fallback in buildTripGpx)
+  // One <trk> per day — use per-day route if picked, else skeleton segment
   const tracks = [];
   let dayStartTime = new Date(trip.createdAt).getTime();
   for (let i = 0; i < n; i++) {
-    const segCoords = coordinates.slice(b[i], b[i + 1] + 1);
+    const dayRoute = trip.days?.[i]?.route;
+    const segCoords = dayRoute?.coordinates || coordinates.slice(b[i], b[i + 1] + 1);
     if (segCoords.length === 0) continue;
     const segDistM = totalDist(segCoords);
     // Naismith: 5 km/h
@@ -1536,6 +1718,960 @@ function downloadTripGpx() {
   toast('GPX downloaded ✓', 'green');
 }
 
+// ── Overpass helpers ──────────────────────────────────────────────────────────
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+
+async function overpassQuery(body) {
+  try {
+    const r = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(body),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+// ── Greenery scoring (Overpass parks bbox) ────────────────────────────────────
+// Mirrors tripSkeletonService.ts scoreGreenery() and findNearbyParksWithStatus()
+const GREENERY_HIT_DEG = 80 / 111_000; // ~80 m in degrees
+
+async function fetchParksForBbox(minLat, minLon, maxLat, maxLon) {
+  const bbox = `${minLat},${minLon},${maxLat},${maxLon}`;
+  const q = `[out:json][timeout:15];
+(
+  way["leisure"="park"](${bbox});
+  way["leisure"="nature_reserve"](${bbox});
+  way["landuse"="grass"](${bbox});
+  way["landuse"="meadow"](${bbox});
+  way["landuse"="forest"](${bbox});
+  way["natural"="wood"](${bbox});
+  way["natural"="scrub"](${bbox});
+);
+out bb;`;
+  const data = await overpassQuery(q);
+  if (!data) return [];
+  return (data.elements || []).filter(e => e.bounds).map(e => e.bounds);
+}
+
+function scoreGreenery(coords, parks) {
+  if (!parks.length || !coords.length) return 0;
+  let hits = 0;
+  for (const c of coords) {
+    for (const p of parks) {
+      if (c.latitude >= p.minlat - GREENERY_HIT_DEG &&
+          c.latitude <= p.maxlat + GREENERY_HIT_DEG &&
+          c.longitude >= p.minlon - GREENERY_HIT_DEG &&
+          c.longitude <= p.maxlon + GREENERY_HIT_DEG) {
+        hits++;
+        break;
+      }
+    }
+  }
+  return hits / coords.length;
+}
+
+async function scoreAllCandidates(cands) {
+  // Compute a combined bbox covering all candidates
+  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+  for (const c of cands) {
+    for (const pt of c.skeleton.coordinates) {
+      if (pt.latitude < minLat) minLat = pt.latitude;
+      if (pt.latitude > maxLat) maxLat = pt.latitude;
+      if (pt.longitude < minLon) minLon = pt.longitude;
+      if (pt.longitude > maxLon) maxLon = pt.longitude;
+    }
+  }
+  // Add padding
+  const pad = 0.1;
+  const parks = await fetchParksForBbox(minLat - pad, minLon - pad, maxLat + pad, maxLon + pad);
+
+  // Score each candidate (subsample to 200 pts max for speed)
+  for (const c of cands) {
+    const coords = c.skeleton.coordinates;
+    const step = Math.max(1, Math.floor(coords.length / 200));
+    const sampled = coords.filter((_, i) => i % step === 0);
+    c.greeneryFraction = scoreGreenery(sampled, parks);
+  }
+
+  // Sort descending by greeneryFraction
+  cands.sort((a, b) => b.greeneryFraction - a.greeneryFraction);
+
+  // Relabel if spread is sufficient (>5% gap between best and worst)
+  const gap = (cands[0]?.greeneryFraction ?? 0) - (cands[cands.length - 1]?.greeneryFraction ?? 0);
+  if (cands.length > 1 && gap > 0.05) {
+    cands[0].label = `${bearingLabel(cands[0].bearing)} · Greener`;
+    cands[cands.length - 1].label = `${bearingLabel(cands[cands.length - 1].bearing)} · Mostly roads`;
+  }
+
+  return cands;
+}
+
+// ── Step flow ─────────────────────────────────────────────────────────────────
+const STEP_IDS = ['p1','p2','p25','p3','p4'];
+
+function goToStep(n) {
+  currentStep = n;
+  STEP_IDS.forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  const panelMap = { 1:'p1', 2:'p2', 2.5:'p25', 3:'p3', 4:'p4' };
+  const el = document.getElementById(panelMap[n]);
+  if (el) el.style.display = n === 3 ? 'block' : n === 2.5 ? 'block' : 'block';
+
+  // Step indicator bar (5 steps)
+  const stepOrder = [1, 2, 2.5, 3, 4];
+  const nIdx = stepOrder.indexOf(n);
+  ['s1','s2','s25','s3','s4'].forEach((id, i) => {
+    const s = document.getElementById(id);
+    if (!s) return;
+    s.className = 'step' + (i < nIdx ? ' done' : i === nIdx ? ' active' : '');
+  });
+
+  if (n === 4) renderSummary();
+}
+
+function confirmSkeleton() {
+  // If only 1 day, skip sleep picker; go straight to per-day picker
+  if (trip.targetDayCount === 1) {
+    startDayPicker();
+  } else {
+    goToStep(2.5);
+    renderSleepStep();
+  }
+}
+
+function goBack() { goToStep(1); }
+
+// ── Sleep / accommodation step (2.5) ─────────────────────────────────────────
+// One "night" per interior day-end. User picks from nearby Overpass camp POIs
+// or pins manually. Night N = the end of Day N (0-indexed).
+
+let sleepPicks = {}; // dayIdx → { id, coord, name, emoji } | 'skip'
+let sleepPois  = {}; // dayIdx → [{id, coord, name, emoji, distM}]
+
+const ACCOM_SEARCH_RADIUS = 4000; // metres
+
+const OVERPASS_CAMP_TAGS = [
+  ['tourism','camp_site'],
+  ['tourism','hostel'],
+  ['tourism','alpine_hut'],
+  ['tourism','wilderness_hut'],
+  ['tourism','guest_house'],
+  ['tourism','hotel'],
+];
+
+const ACCOM_EMOJI = {
+  camp_site: '⛺',
+  hostel: '🛏',
+  alpine_hut: '🏔',
+  wilderness_hut: '🪵',
+  guest_house: '🏡',
+  hotel: '🏨',
+};
+
+async function fetchAccomPois(coord, radiusM) {
+  const lat = coord.latitude, lon = coord.longitude;
+  // Convert radius to degrees bbox
+  const degLat = radiusM / 111_000;
+  const degLon = radiusM / (111_000 * Math.cos(lat * Math.PI / 180));
+  const bbox = `${lat - degLat},${lon - degLon},${lat + degLat},${lon + degLon}`;
+  const tagFilters = OVERPASS_CAMP_TAGS.map(([k, v]) => `node["${k}"="${v}"](${bbox});`).join('\n  ');
+  const q = `[out:json][timeout:12];
+(
+  ${tagFilters}
+);
+out center 20;`;
+  const data = await overpassQuery(q);
+  if (!data) return [];
+  return (data.elements || []).map(e => {
+    const kind = e.tags?.tourism || 'camp_site';
+    const name = e.tags?.name || e.tags?.['name:en'] || kind.replace(/_/g, ' ');
+    const eLat = e.lat ?? e.center?.lat, eLon = e.lon ?? e.center?.lon;
+    if (!eLat || !eLon) return null;
+    const distM = Math.round(haversine({ latitude: lat, longitude: lon }, { latitude: eLat, longitude: eLon }));
+    return { id: String(e.id), coord: { latitude: eLat, longitude: eLon }, name, emoji: ACCOM_EMOJI[kind] || '🏨', distM };
+  }).filter(Boolean).sort((a, b) => a.distM - b.distM).slice(0, 6);
+}
+
+function renderSleepStep() {
+  const n = trip.targetDayCount;
+  const nights = n - 1; // interior night count
+  document.getElementById('sleep-nav').textContent = `${nights} night${nights !== 1 ? 's' : ''}`;
+
+  let html = '';
+  for (let i = 0; i < nights; i++) {
+    const dayEnd = trip.skeleton.dayEnds[i];
+    const coord = dayEnd.kind === 'pinned' ? dayEnd.coord : trip.skeleton.coordinates[dayEnd.index];
+    const color = DAY_COLORS[i % DAY_COLORS.length];
+    const pick = sleepPicks[i];
+    html += `<div style="margin-bottom:16px">
+      <div class="sleep-night-header">
+        <div class="sleep-dot" style="background:${color}"></div>
+        <div class="sleep-night-label">Night ${i + 1} — end of Day ${i + 1}</div>
+      </div>
+      <div id="sleep-cards-${i}" class="accom-loading"><span class="spinner"></span> Searching nearby…</div>
+    </div>`;
+  }
+  html += `<div style="margin-top:8px;display:flex;gap:8px">
+    <button class="btn btn-outline btn-sm" onclick="goToStep(2)" style="flex:1">‹ Back</button>
+    <button class="btn btn-accent btn-sm" onclick="startDayPicker()" style="flex:1">Continue →</button>
+  </div>`;
+  document.getElementById('sleep-body').innerHTML = html;
+
+  // Fire parallel POI fetches per night
+  for (let i = 0; i < nights; i++) {
+    const dayEnd = trip.skeleton.dayEnds[i];
+    const coord = dayEnd.kind === 'pinned' ? dayEnd.coord : trip.skeleton.coordinates[dayEnd.index];
+    fetchAccomPois(coord, ACCOM_SEARCH_RADIUS).then(pois => {
+      sleepPois[i] = pois;
+      renderSleepNight(i, coord);
+    });
+  }
+}
+
+function renderSleepNight(i, coord) {
+  const el = document.getElementById(`sleep-cards-${i}`);
+  if (!el) return;
+  const pois = sleepPois[i] || [];
+  const pick = sleepPicks[i];
+  let html = '';
+  if (pois.length === 0) {
+    html += `<div class="accom-loading">No accommodation found nearby</div>`;
+  } else {
+    html += pois.map((p, j) =>
+      `<div class="accom-card${pick && pick.id === p.id ? ' picked' : ''}" onclick="pickSleepByIdx(${i}, ${j})">
+        <div class="accom-emoji">${p.emoji}</div>
+        <div style="flex:1">
+          <div class="accom-name">${p.name}</div>
+          <div class="accom-dist">${p.distM < 1000 ? p.distM + 'm away' : (p.distM/1000).toFixed(1) + 'km away'}</div>
+        </div>
+        ${pick && pick.id === p.id ? '<div style="color:var(--accent);font-size:16px;align-self:center">✓</div>' : ''}
+      </div>`
+    ).join('');
+  }
+  // Wild-camp / skip option
+  html += `<div class="accom-card${pick === 'skip' ? ' picked' : ''}" onclick="pickSleep(${i}, 'skip')">
+    <div class="accom-emoji">🌙</div>
+    <div style="flex:1">
+      <div class="accom-name">Wild camp / no stop</div>
+      <div class="accom-dist">Mark the end-of-day point only</div>
+    </div>
+    ${pick === 'skip' ? '<div style="color:var(--accent);font-size:16px;align-self:center">✓</div>' : ''}
+  </div>`;
+  el.innerHTML = html;
+  el.className = '';
+}
+
+function pickSleepByIdx(dayIdx, poiIdx) {
+  const poi = (sleepPois[dayIdx] || [])[poiIdx];
+  if (poi) pickSleep(dayIdx, poi);
+}
+
+function pickSleep(dayIdx, poi) {
+  const dayEnd = trip.skeleton.dayEnds[dayIdx];
+  const coord = dayEnd.kind === 'pinned' ? dayEnd.coord : trip.skeleton.coordinates[dayEnd.index];
+  if (poi === 'skip') {
+    sleepPicks[dayIdx] = 'skip';
+    // Ensure day-end remains a 'cut' (not pinned to poi)
+  } else {
+    sleepPicks[dayIdx] = poi;
+    // Pin the day-end to the accommodation coord
+    trip.skeleton.dayEnds[dayIdx] = { kind: 'pinned', coord: poi.coord, label: poi.name, poiKind: 'camp' };
+    trip.updatedAt = new Date().toISOString();
+    // Update map marker
+    if (dayEndMarkers[dayIdx]) dayEndMarkers[dayIdx].setLngLat([poi.coord.longitude, poi.coord.latitude]);
+  }
+  renderSleepNight(dayIdx, coord);
+}
+
+// ── Per-day route picker (Step 3) ─────────────────────────────────────────────
+const FLAVOUR_COLORS = { direct: '#3b82f6', paths: '#a3e635', scenic: '#a855f7' };
+const FLAVOUR_LABELS = { direct: 'Direct', paths: 'Paths', scenic: 'Scenic' };
+const FLAVOUR_ICONS  = { direct: '→', paths: '🌿', scenic: '〰' };
+const DETOUR_FRACTION = 0.25;
+const WALK_SPEED_KMH = 5;
+
+let currentDayIdx = 0;
+let dayRoutes = []; // Route | null per day
+let dayAlts   = []; // [{direct, paths, scenic}] per day (flavour → coords+dist)
+let currentDayAlts = null; // alts for current day being shown
+let pickedFlavour = null;  // 'direct'|'paths'|'scenic'
+let waypointMode = false;
+let customWaypoints = []; // [{coord, marker}]
+let poiMarkers  = []; // MapLibre markers for POIs
+let poiData     = { water: [], shop: [], landmark: [] };
+let poiVisible  = { water: false, shop: false, landmark: false };
+let replanPending = false;
+
+function startDayPicker() {
+  currentDayIdx = 0;
+  dayRoutes = new Array(trip.targetDayCount).fill(null);
+  dayAlts   = new Array(trip.targetDayCount).fill(null);
+  goToStep(3);
+  renderDayPicker(0);
+}
+
+function dayPickerBack() {
+  if (currentDayIdx === 0) {
+    // Back to sleep step
+    clearDayPickerMapLayers();
+    goToStep(trip.targetDayCount > 1 ? 2.5 : 2);
+  } else {
+    currentDayIdx--;
+    renderDayPicker(currentDayIdx);
+  }
+}
+
+function getB() {
+  return boundaries(trip.skeleton);
+}
+
+function getDayBounds(dayIdx) {
+  const b = getB();
+  const coords = trip.skeleton.coordinates;
+  const start = coords[b[dayIdx]];
+  const end   = coords[b[dayIdx + 1]];
+  return { start, end };
+}
+
+async function renderDayPicker(dayIdx) {
+  currentDayIdx = dayIdx;
+  clearCustomWaypoints();
+  waypointMode = false;
+  clearDayPickerMapLayers();
+  clearPoiMarkers();
+  poiData = { water: [], shop: [], landmark: [] };
+  poiVisible = { water: false, shop: false, landmark: false };
+
+  const n = trip.targetDayCount;
+  document.getElementById('day-picker-title').textContent = `Day ${dayIdx + 1}`;
+  document.getElementById('day-picker-nav').textContent = `${dayIdx + 1} / ${n}`;
+  document.getElementById('day-picker-back-btn').textContent = dayIdx === 0 ? `‹ ${n > 1 ? 'Stops' : 'Skeleton'}` : `‹ Day ${dayIdx}`;
+
+  const body = document.getElementById('day-picker-body');
+  body.innerHTML = `<div class="accom-loading" id="alts-loading"><span class="spinner"></span> Generating routes for Day ${dayIdx + 1}…</div>`;
+
+  const { start, end } = getDayBounds(dayIdx);
+
+  // Generate 3 alternatives
+  try {
+    const alts = await generateDayAlts(start, end, dayIdx);
+    dayAlts[dayIdx] = alts;
+    currentDayAlts = alts;
+
+    // Default pick = previously picked or first available
+    if (!pickedFlavour || !alts[pickedFlavour]) {
+      pickedFlavour = alts.direct ? 'direct' : alts.paths ? 'paths' : 'scenic';
+    }
+
+    // Show the picked alt on map
+    showDayAltOnMap(alts, pickedFlavour, dayIdx);
+
+    // Kick off POI fetches in background
+    fetchDayPois(alts, dayIdx);
+
+    renderDayPickerBody(alts, dayIdx);
+  } catch(e) {
+    body.innerHTML = `<p style="color:var(--red);font-size:13px">⚠ ${e.message || 'Route generation failed'}</p>
+      <button class="btn btn-outline btn-sm" onclick="renderDayPicker(${dayIdx})" style="margin-top:8px;width:100%">Retry</button>`;
+  }
+}
+
+function renderDayPickerBody(alts, dayIdx) {
+  const n = trip.targetDayCount;
+  let html = '';
+
+  // Alt cards
+  for (const [flavour, alt] of Object.entries(alts)) {
+    if (!alt) continue;
+    const selected = flavour === pickedFlavour;
+    const color = FLAVOUR_COLORS[flavour];
+    const feel = alt.feel || '';
+    const surface = alt.surface || '';
+    const pathPct = alt.pathPct !== undefined ? Math.round(alt.pathPct * 100) : null;
+    const ascentM = alt.ascentM || null;
+    html += `<div class="alt-card${selected ? ' selected' : ''}" id="altcard-${flavour}"
+        style="--alt-color:${color}" onclick="selectAlt('${flavour}')">
+      <div class="alt-header">
+        <div class="alt-dot" style="background:${color}"></div>
+        <div class="alt-label">${FLAVOUR_ICONS[flavour]} ${FLAVOUR_LABELS[flavour]}</div>
+        ${feel ? `<div class="alt-feel-badge">${feel}</div>` : ''}
+      </div>
+      <div class="alt-stats">
+        <div class="alt-stat">
+          <div class="alt-stat-val">${(alt.distanceMetres/1000).toFixed(1)}</div>
+          <div class="alt-stat-lbl">km</div>
+        </div>
+        <div class="alt-stat">
+          <div class="alt-stat-val">${Math.round(alt.distanceMetres/1000/WALK_SPEED_KMH*60)}</div>
+          <div class="alt-stat-lbl">min</div>
+        </div>
+        ${pathPct !== null ? `<div class="alt-stat">
+          <div class="alt-stat-val">${pathPct}%</div>
+          <div class="alt-stat-lbl">paths</div>
+        </div>` : ''}
+        ${ascentM ? `<div class="alt-stat">
+          <div class="alt-stat-val">${ascentM}m</div>
+          <div class="alt-stat-lbl">↑</div>
+        </div>` : ''}
+      </div>
+      ${surface ? `<div class="alt-surface">${surface}</div>` : ''}
+    </div>`;
+  }
+
+  // POI chips row
+  html += `<div class="poi-chip-row" id="poi-chips">
+    <div class="poi-chip${poiVisible.water ? ' on' : ''}" id="chip-water"
+        style="${poiVisible.water ? 'background:#3b82f6;border-color:#3b82f6' : ''}"
+        onclick="togglePoi('water')">
+      💧 <span>Water</span><span class="poi-chip-badge" id="badge-water">0</span>
+    </div>
+    <div class="poi-chip${poiVisible.shop ? ' on' : ''}" id="chip-shop"
+        style="${poiVisible.shop ? 'background:#f59e0b;border-color:#f59e0b' : ''}"
+        onclick="togglePoi('shop')">
+      🛒 <span>Shop</span><span class="poi-chip-badge" id="badge-shop">0</span>
+    </div>
+    <div class="poi-chip${poiVisible.landmark ? ' on' : ''}" id="chip-landmark"
+        style="${poiVisible.landmark ? 'background:#a855f7;border-color:#a855f7' : ''}"
+        onclick="togglePoi('landmark')">
+      📍 <span>Points</span><span class="poi-chip-badge" id="badge-landmark">0</span>
+    </div>
+  </div>`;
+
+  // Waypoint toggle
+  html += `<button class="waypoint-toggle${waypointMode ? ' on' : ''}" id="wp-toggle" onclick="toggleWaypointMode()">
+    ${waypointMode ? '✕ Cancel waypoint' : '+ Add waypoint (tap map)'}
+  </button>`;
+
+  if (customWaypoints.length > 0) {
+    html += `<p style="font-size:11px;color:var(--text3);margin-bottom:8px">
+      ${customWaypoints.length} waypoint${customWaypoints.length !== 1 ? 's' : ''} added · long-press pin to remove
+    </p>`;
+  }
+
+  // Pick button
+  const isLast = dayIdx === n - 1;
+  html += `<button class="pick-btn" onclick="pickDay(${dayIdx})">
+    ${isLast ? 'Finish planning →' : `Use this route · Day ${dayIdx + 2} →`}
+  </button>`;
+
+  document.getElementById('day-picker-body').innerHTML = html;
+}
+
+// ── 3-flavour route generation ────────────────────────────────────────────────
+async function generateDayAlts(start, end, dayIdx) {
+  const results = {};
+
+  // Direct: BRouter start → end
+  let directCoords = null;
+  try {
+    directCoords = await routeBRouter([start, end]);
+    if (directCoords && directCoords.length >= 2) {
+      results.direct = {
+        coordinates: directCoords,
+        distanceMetres: totalDist(directCoords),
+        pathPct: 0.5,    // BRouter hiking-mountain is mostly paths
+        feel: calcFeel(totalDist(directCoords), null),
+        surface: 'mixed',
+      };
+    }
+  } catch (e) { console.warn('[dayAlts] direct failed', e.message); }
+
+  // Paths: try hiking-hiking profile (stick to paths)
+  let pathsCoords = null;
+  try {
+    pathsCoords = await routeBRouterProfile([start, end], 'hiking-hiking');
+    if (pathsCoords && pathsCoords.length >= 2) {
+      // Only keep if meaningfully different from direct (>50m average deviation)
+      const isDup = directCoords && routeSimilarity(directCoords, pathsCoords) > 0.85;
+      if (!isDup) {
+        results.paths = {
+          coordinates: pathsCoords,
+          distanceMetres: totalDist(pathsCoords),
+          pathPct: 0.8,
+          feel: calcFeel(totalDist(pathsCoords), null),
+          surface: 'mostly-paths',
+        };
+      }
+    }
+  } catch (e) { console.warn('[dayAlts] paths failed', e.message); }
+
+  // Scenic: route via a perpendicular midpoint offset
+  try {
+    for (const side of [1, -1]) {
+      const via = perpendicularMidpoint(start, end, DETOUR_FRACTION, side);
+      const scenicCoords = await routeBRouter([start, via, end]);
+      if (!scenicCoords || scenicCoords.length < 2) continue;
+      // Must be meaningfully different from existing alts
+      const dup1 = directCoords && routeSimilarity(directCoords, scenicCoords) > 0.8;
+      const dup2 = pathsCoords && routeSimilarity(pathsCoords, scenicCoords) > 0.8;
+      if (dup1 || dup2) continue;
+      results.scenic = {
+        coordinates: scenicCoords,
+        distanceMetres: totalDist(scenicCoords),
+        pathPct: 0.65,
+        feel: calcFeel(totalDist(scenicCoords), null),
+        surface: 'mixed',
+      };
+      break;
+    }
+  } catch (e) { console.warn('[dayAlts] scenic failed', e.message); }
+
+  // Must have at least one alt
+  if (Object.keys(results).length === 0) {
+    // Last resort: use skeleton segment as-is
+    const b = getB();
+    const coords = trip.skeleton.coordinates.slice(b[dayIdx], b[dayIdx + 1] + 1);
+    results.direct = { coordinates: coords, distanceMetres: totalDist(coords), pathPct: 0.5, feel: 'easy', surface: 'mixed' };
+  }
+
+  // Fetch elevation for each alt (fire-and-forget, updates feel/ascent when ready)
+  for (const [flavour, alt] of Object.entries(results)) {
+    fetchElevationStats(alt.coordinates).then(elev => {
+      if (!elev) return;
+      alt.ascentM = elev.ascentMetres;
+      alt.feel = calcFeel(alt.distanceMetres, elev.ascentMetres);
+      // Re-render the specific card if still on this day
+      if (currentDayIdx === dayIdx) {
+        const card = document.getElementById(`altcard-${flavour}`);
+        if (card) {
+          const ascentStat = card.querySelector('.alt-stat:last-child .alt-stat-lbl');
+          if (ascentStat && ascentStat.textContent === '↑') {
+            card.querySelector('.alt-stat:last-child .alt-stat-val').textContent = `${elev.ascentMetres}m`;
+          }
+        }
+      }
+    });
+  }
+
+  return results;
+}
+
+async function routeBRouterProfile(waypoints, profile) {
+  const lonlats = waypoints.map(w => `${w.longitude},${w.latitude}`).join('|');
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Routing failed (${r.status})`);
+  const gj = await r.json();
+  const feat = gj.features?.[0];
+  if (!feat) throw new Error('No route');
+  return feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+}
+
+function perpendicularMidpoint(start, end, fraction, side) {
+  // Midpoint of the segment
+  const midLat = (start.latitude + end.latitude) / 2;
+  const midLon = (start.longitude + end.longitude) / 2;
+  // Segment vector
+  const dLat = end.latitude - start.latitude;
+  const dLon = end.longitude - start.longitude;
+  const len = Math.sqrt(dLat * dLat + dLon * dLon) || 1;
+  // Perpendicular offset in degrees, scaled by segment length * fraction
+  const perpLat = -dLon / len * (Math.abs(dLat + dLon)) * fraction * side;
+  const perpLon =  dLat / len * (Math.abs(dLat + dLon)) * fraction * side;
+  return { latitude: midLat + perpLat, longitude: midLon + perpLon };
+}
+
+function routeSimilarity(a, b) {
+  // Approx: check fraction of b's points within 100m of any a point
+  if (!a.length || !b.length) return 0;
+  const step = Math.max(1, Math.floor(b.length / 20));
+  const sample = b.filter((_, i) => i % step === 0);
+  let matches = 0;
+  for (const bp of sample) {
+    for (const ap of a) {
+      if ((bp.latitude - ap.latitude)**2 + (bp.longitude - ap.longitude)**2 < (0.001)**2) {
+        matches++; break;
+      }
+    }
+  }
+  return matches / sample.length;
+}
+
+function calcFeel(distM, ascentM) {
+  const km = distM / 1000;
+  const ascentPerKm = ascentM && km > 0 ? ascentM / km : 0;
+  if (km > 25 && ascentPerKm > 30) return 'tough';
+  if (km > 25) return 'long';
+  if (ascentPerKm > 30) return 'hilly';
+  if (ascentPerKm > 15) return 'moderate';
+  return 'easy';
+}
+
+// ── Alt selection and map display ─────────────────────────────────────────────
+const DAY_ALT_SOURCES = ['dayalt-direct','dayalt-paths','dayalt-scenic'];
+let dayAltLayersAdded = false;
+
+function ensureDayAltLayers() {
+  if (dayAltLayersAdded || !map.isStyleLoaded()) return;
+  for (const flavour of ['direct','paths','scenic']) {
+    const src = `dayalt-${flavour}`;
+    if (!map.getSource(src)) {
+      map.addSource(src, { type: 'geojson', data: emptyGJ() });
+      map.addLayer({ id: src, type: 'line', source: src,
+        paint: { 'line-color': FLAVOUR_COLORS[flavour], 'line-width': ['case',['==',['id'],0],6,4],
+                 'line-opacity': ['case',['==',['id'],0],1,0.4] },
+        layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    }
+  }
+  dayAltLayersAdded = true;
+}
+
+function showDayAltOnMap(alts, selectedFlavour, dayIdx) {
+  if (!map.isStyleLoaded()) { map.once('idle', () => showDayAltOnMap(alts, selectedFlavour, dayIdx)); return; }
+  ensureDayAltLayers();
+  // Hide skeleton segments, show only day alt layers
+  hideSkeleton();
+  for (const [flavour, alt] of Object.entries(alts)) {
+    const src = map.getSource(`dayalt-${flavour}`);
+    if (!src) continue;
+    if (alt) {
+      src.setData({ type: 'Feature', id: flavour === selectedFlavour ? 0 : 1, properties: {},
+        geometry: { type: 'LineString', coordinates: alt.coordinates.map(c => [c.longitude, c.latitude]) } });
+    } else {
+      src.setData(emptyGJ());
+    }
+  }
+  // Fit map to selected alt
+  const alt = alts[selectedFlavour];
+  if (alt && alt.coordinates.length) fitMap(alt.coordinates);
+}
+
+function hideSkeleton() {
+  for (let i = 0; i < 14; i++) {
+    const src = map.getSource(`seg${i}`);
+    if (src) src.setData(emptyGJ());
+  }
+}
+
+function clearDayPickerMapLayers() {
+  for (const flavour of ['direct','paths','scenic']) {
+    const src = map.getSource(`dayalt-${flavour}`);
+    if (src) src.setData(emptyGJ());
+  }
+  // Restore skeleton segments
+  renderOnMap();
+}
+
+function selectAlt(flavour) {
+  if (!currentDayAlts || !currentDayAlts[flavour]) return;
+  pickedFlavour = flavour;
+  // Update alt card styles
+  for (const f of ['direct','paths','scenic']) {
+    const card = document.getElementById(`altcard-${f}`);
+    if (card) card.classList.toggle('selected', f === flavour);
+  }
+  // Update map
+  showDayAltOnMap(currentDayAlts, flavour, currentDayIdx);
+}
+
+// ── POI overlays ──────────────────────────────────────────────────────────────
+const POI_COLORS = { water: '#3b82f6', shop: '#f59e0b', landmark: '#a855f7' };
+
+const OVERPASS_POI_TAGS = {
+  water: [
+    'node["amenity"="drinking_water"]',
+    'node["natural"="spring"]',
+    'node["amenity"="water_tap"]',
+  ],
+  shop: [
+    'node["shop"="convenience"]',
+    'node["shop"="supermarket"]',
+    'node["amenity"="cafe"]',
+    'node["amenity"="pub"]',
+  ],
+  landmark: [
+    'node["natural"="peak"]',
+    'node["tourism"="viewpoint"]',
+    'node["historic"="monument"]',
+    'node["historic"="ruins"]',
+  ],
+};
+
+async function fetchDayPois(alts, dayIdx) {
+  // Union polyline from all alts
+  const allCoords = Object.values(alts).flatMap(a => a ? a.coordinates : []);
+  if (allCoords.length < 2) return;
+
+  // Sample every ~3km for bbox
+  const step = Math.max(1, Math.floor(allCoords.length / 20));
+  const sampled = allCoords.filter((_, i) => i % step === 0);
+  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+  for (const c of sampled) {
+    if (c.latitude < minLat) minLat = c.latitude;
+    if (c.latitude > maxLat) maxLat = c.latitude;
+    if (c.longitude < minLon) minLon = c.longitude;
+    if (c.longitude > maxLon) maxLon = c.longitude;
+  }
+  const pad = 0.01;
+  const bbox = `${minLat-pad},${minLon-pad},${maxLat+pad},${maxLon+pad}`;
+
+  for (const kind of ['water','shop','landmark']) {
+    const tagFilters = OVERPASS_POI_TAGS[kind].map(t => `${t}(${bbox});`).join('\n  ');
+    const q = `[out:json][timeout:12];\n(\n  ${tagFilters}\n);\nout 30;`;
+    overpassQuery(q).then(data => {
+      if (!data) return;
+      const pois = (data.elements || []).map(e => ({
+        id: String(e.id), kind,
+        coord: { latitude: e.lat, longitude: e.lon },
+        name: e.tags?.name || e.tags?.['name:en'] || kind,
+      })).filter(p => p.coord.latitude);
+      poiData[kind] = pois;
+      const badge = document.getElementById(`badge-${kind}`);
+      if (badge) badge.textContent = pois.length;
+      if (poiVisible[kind] && currentDayIdx === dayIdx) showPoiMarkers(kind);
+    });
+  }
+}
+
+function clearPoiMarkers() {
+  poiMarkers.forEach(m => m.remove());
+  poiMarkers = [];
+}
+
+function showPoiMarkers(kind) {
+  // Remove existing markers for this kind
+  poiMarkers = poiMarkers.filter(m => { if (m._poiKind === kind) { m.remove(); return false; } return true; });
+  const color = POI_COLORS[kind];
+  for (const poi of poiData[kind]) {
+    const el = document.createElement('div');
+    el.style.cssText = `width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #fff;
+      display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4)`;
+    el.textContent = kind === 'water' ? '💧' : kind === 'shop' ? '🛒' : '📍';
+    el.title = poi.name;
+    // Tap → show name toast; long-press → add as via
+    el.onclick = () => toast(poi.name, '');
+    el.oncontextmenu = (e) => { e.preventDefault(); addPoiAsVia(poi); };
+    const m = new maplibregl.Marker({ element: el })
+      .setLngLat([poi.coord.longitude, poi.coord.latitude]).addTo(map);
+    m._poiKind = kind;
+    poiMarkers.push(m);
+  }
+}
+
+function togglePoi(kind) {
+  poiVisible[kind] = !poiVisible[kind];
+  const chip = document.getElementById(`chip-${kind}`);
+  if (chip) {
+    chip.classList.toggle('on', poiVisible[kind]);
+    const color = POI_COLORS[kind];
+    chip.style.background = poiVisible[kind] ? color : '';
+    chip.style.borderColor = poiVisible[kind] ? color : '';
+  }
+  if (poiVisible[kind]) {
+    showPoiMarkers(kind);
+  } else {
+    poiMarkers = poiMarkers.filter(m => { if (m._poiKind === kind) { m.remove(); return false; } return true; });
+  }
+}
+
+async function addPoiAsVia(poi) {
+  toast(`Adding ${poi.name} as waypoint…`, '');
+  customWaypoints.push({ coord: poi.coord, isPoi: true, poiName: poi.name });
+  await replanWithVias();
+}
+
+// ── Custom waypoints (map-tap) ────────────────────────────────────────────────
+function clearCustomWaypoints() {
+  customWaypoints.forEach(w => { if (w.marker) w.marker.remove(); });
+  customWaypoints = [];
+}
+
+function toggleWaypointMode() {
+  waypointMode = !waypointMode;
+  const btn = document.getElementById('wp-toggle');
+  if (btn) {
+    btn.classList.toggle('on', waypointMode);
+    btn.textContent = waypointMode ? '✕ Cancel waypoint' : '+ Add waypoint (tap map)';
+  }
+  const hint = document.getElementById('pick-hint');
+  if (waypointMode) {
+    hint.textContent = '📍 Tap the map to add a waypoint';
+    hint.style.display = 'block';
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+async function onMapTapWaypoint(lat, lng) {
+  if (!waypointMode) return;
+  const coord = { latitude: lat, longitude: lng };
+  const idx = customWaypoints.length + 1;
+  const el = document.createElement('div');
+  el.className = 'custom-wp-pin';
+  el.textContent = `W${idx}`;
+  el.title = `W${idx} — long-press to remove`;
+  el.oncontextmenu = (e) => { e.preventDefault(); removeCustomWaypoint(coord); };
+  const m = new maplibregl.Marker({ element: el, draggable: false })
+    .setLngLat([lng, lat]).addTo(map);
+  customWaypoints.push({ coord, marker: m });
+  // Turn off waypoint mode after one tap
+  waypointMode = false;
+  const btn = document.getElementById('wp-toggle');
+  if (btn) { btn.classList.remove('on'); btn.textContent = '+ Add waypoint (tap map)'; }
+  document.getElementById('pick-hint').style.display = 'none';
+  // Re-render body to update waypoint count
+  if (currentDayAlts) renderDayPickerBody(currentDayAlts, currentDayIdx);
+  await replanWithVias();
+}
+
+async function removeCustomWaypoint(coord) {
+  const idx = customWaypoints.findIndex(w => w.coord === coord);
+  if (idx === -1) return;
+  customWaypoints[idx].marker?.remove();
+  customWaypoints.splice(idx, 1);
+  // Renumber remaining pins
+  customWaypoints.forEach((w, i) => { if (w.marker?._element) w.marker._element.textContent = `W${i+1}`; });
+  if (currentDayAlts) renderDayPickerBody(currentDayAlts, currentDayIdx);
+  await replanWithVias();
+}
+
+async function replanWithVias() {
+  if (!currentDayAlts || replanPending) return;
+  replanPending = true;
+  const hint = document.getElementById('pick-hint');
+  if (hint) { hint.textContent = '↺ Replanning…'; hint.style.display = 'block'; }
+
+  const { start, end } = getDayBounds(currentDayIdx);
+  const viaCoords = customWaypoints.map(w => w.coord);
+
+  try {
+    const waypoints = [start, ...viaCoords, end];
+    const newCoords = await routeBRouter(waypoints);
+    if (newCoords && currentDayAlts[pickedFlavour]) {
+      currentDayAlts[pickedFlavour].coordinates = newCoords;
+      currentDayAlts[pickedFlavour].distanceMetres = totalDist(newCoords);
+      showDayAltOnMap(currentDayAlts, pickedFlavour, currentDayIdx);
+      renderDayPickerBody(currentDayAlts, currentDayIdx);
+    }
+  } catch(e) { toast('Replan failed: ' + e.message, 'red'); }
+
+  if (hint) hint.style.display = 'none';
+  replanPending = false;
+}
+
+// ── Pick day and compile ──────────────────────────────────────────────────────
+function buildRouteObj(dayIdx, alt) {
+  const b = getB();
+  const start = trip.skeleton.coordinates[b[dayIdx]];
+  const end   = trip.skeleton.coordinates[b[dayIdx + 1]];
+  const sleep = sleepPicks[dayIdx];
+  const accommodation = (sleep && sleep !== 'skip')
+    ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
+    : null;
+  return {
+    id: crypto.randomUUID(),
+    name: `Day ${dayIdx + 1}`,
+    coordinates: alt.coordinates,
+    steps: [],
+    distanceMetres: alt.distanceMetres,
+    durationMinutes: Math.round(alt.distanceMetres / 1000 / WALK_SPEED_KMH * 60),
+    createdAt: new Date().toISOString(),
+    saved: false,
+    seed: -1,
+    mode: trip.isLoop ? 'loop' : 'out-and-back',
+    viaPoint: null,
+    viaLabel: null,
+    rating: null,
+    pathDensity: alt.pathPct || 0.5,
+    ascentMetres: alt.ascentM || undefined,
+  };
+}
+
+function buildTripDay(dayIdx, routeObj) {
+  const b = getB();
+  const coords = trip.skeleton.coordinates;
+  const start = coords[b[dayIdx]];
+  const end   = coords[b[dayIdx + 1]];
+  const sleep = sleepPicks[dayIdx];
+  const accommodation = (sleep && sleep !== 'skip')
+    ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
+    : null;
+  return {
+    id: crypto.randomUUID(),
+    start,
+    end,
+    route: routeObj,
+    accommodation,
+    alts: { picked: routeObj, options: [] },
+  };
+}
+
+function compileMasterRoute(days) {
+  const coords = [];
+  let totalDist = 0;
+  for (let i = 0; i < days.length; i++) {
+    const r = days[i].route;
+    if (!r) return null;
+    const slice = i === 0 ? r.coordinates : r.coordinates.slice(1);
+    coords.push(...slice);
+    totalDist += r.distanceMetres;
+  }
+  return {
+    id: `${trip.id}-master`,
+    name: trip.name,
+    coordinates: coords,
+    steps: [],
+    distanceMetres: totalDist,
+    durationMinutes: Math.round(totalDist / 1000 / WALK_SPEED_KMH * 60),
+    createdAt: new Date().toISOString(),
+    saved: false,
+    seed: -1,
+    mode: trip.isLoop ? 'loop' : 'out-and-back',
+    viaPoint: null,
+    viaLabel: null,
+    rating: null,
+  };
+}
+
+async function pickDay(dayIdx) {
+  const alt = currentDayAlts?.[pickedFlavour];
+  if (!alt) { toast('No route selected', 'red'); return; }
+
+  const routeObj = buildRouteObj(dayIdx, alt);
+  const tripDay = buildTripDay(dayIdx, routeObj);
+  dayRoutes[dayIdx] = routeObj;
+
+  // Build the partial days array so far
+  trip.days = [...Array(dayIdx + 1)].map((_, i) => {
+    if (i < dayIdx && !dayRoutes[i]) {
+      // Fallback to skeleton segment if we somehow missed a day
+      const b = getB();
+      const coords = trip.skeleton.coordinates.slice(b[i], b[i+1]+1);
+      const dist = totalDist(coords);
+      const r = { id: crypto.randomUUID(), name: `Day ${i+1}`, coordinates: coords, steps: [], distanceMetres: dist,
+        durationMinutes: Math.round(dist/1000/WALK_SPEED_KMH*60), createdAt: new Date().toISOString(),
+        saved: false, seed: -1, mode: trip.isLoop ? 'loop' : 'out-and-back', viaPoint: null, viaLabel: null, rating: null };
+      dayRoutes[i] = r;
+      return buildTripDay(i, r);
+    }
+    if (i === dayIdx) return tripDay;
+    return buildTripDay(i, dayRoutes[i]);
+  });
+
+  if (dayIdx === trip.targetDayCount - 1) {
+    // All days done — compile master route and mark complete
+    trip.days = trip.days; // already set above
+    trip.masterRoute = compileMasterRoute(trip.days);
+    trip.stage = 'complete';
+    trip.updatedAt = new Date().toISOString();
+    clearDayPickerMapLayers();
+    renderOnMap();
+    goToStep(4);
+  } else {
+    currentDayIdx = dayIdx + 1;
+    pickedFlavour = null;
+    renderDayPicker(currentDayIdx);
+  }
+}
+
+// ── Map click routing for waypoints ──────────────────────────────────────────
+// (Extends the existing map.on('click') handler — we check waypointMode)
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function updateGenBtn() {
   const ready = trip.start && (trip.finish || trip.isLoop);
@@ -1563,11 +2699,19 @@ function newTrip() {
   trip = newTripObj();
   candidates = [];
   activeCandidateIdx = 0;
+  sleepPicks = {}; sleepPois = {};
+  dayRoutes = []; dayAlts = [];
+  currentDayIdx = 0; pickedFlavour = null;
+  clearCustomWaypoints();
+  clearPoiMarkers();
+  poiData = { water: [], shop: [], landmark: [] };
+  poiVisible = { water: false, shop: false, landmark: false };
   if (startMarker) { startMarker.remove(); startMarker = null; }
   if (finishMarker) { finishMarker.remove(); finishMarker = null; }
   dayEndMarkers.forEach(m => m.remove()); dayEndMarkers.length = 0;
   stopMarkers.forEach(m => m.marker.remove()); stopMarkers.length = 0;
   for (let i = 0; i < 14; i++) { const s = map.getSource(`seg${i}`); if (s) s.setData(emptyGJ()); }
+  for (const f of ['direct','paths','scenic']) { const s = map.getSource(`dayalt-${f}`); if (s) s.setData(emptyGJ()); }
   document.getElementById('trip-name').value = '';
   document.getElementById('start-set').style.display = 'none';
   document.getElementById('start-search-wrap').style.display = 'block';
