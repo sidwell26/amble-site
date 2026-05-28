@@ -46,6 +46,23 @@
     .auth-logo { font-size: 32px; font-weight: 900; color: var(--accent); text-align: center; }
     .auth-sub { font-size: 14px; color: var(--text2); text-align: center; line-height: 1.5; }
     .auth-err { font-size: 13px; color: var(--red); text-align: center; min-height: 18px; }
+    /* Paywall card — shown instead of the planner for free-tier users */
+    #paywall-panel {
+      position: fixed; inset: 0; background: rgba(10,10,10,0.97);
+      display: none; align-items: center; justify-content: center; z-index: 200;
+    }
+    .paywall-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 32px; width: 400px; max-width: 92vw; display: flex; flex-direction: column; gap: 16px;
+    }
+    .paywall-logo { font-size: 32px; font-weight: 900; color: var(--accent); text-align: center; }
+    .paywall-title { font-size: 20px; font-weight: 700; text-align: center; }
+    .paywall-sub { font-size: 14px; color: var(--text2); text-align: center; line-height: 1.6; }
+    .paywall-features { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    .paywall-features li { font-size: 13px; color: var(--text2); display: flex; align-items: flex-start; gap: 10px; }
+    .paywall-features li::before { content: '✓'; color: var(--accent); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+    .paywall-price { font-size: 13px; color: var(--text3); text-align: center; }
+    .paywall-signout { font-size: 12px; color: var(--text3); text-align: center; cursor: pointer; text-decoration: underline; }
     /* Controls */
     label { font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 4px; }
     input[type=text], input[type=number] {
@@ -360,7 +377,31 @@
   </div>
 </div>
 
-<div class="app">
+<!-- Paywall overlay — shown for signed-in free-tier users -->
+<div id="paywall-panel">
+  <div class="paywall-card">
+    <div class="paywall-logo">Amble</div>
+    <div class="paywall-title">Web planner is a Pro feature</div>
+    <p class="paywall-sub">Plan multi-day trips on your laptop and walk them on your phone — instantly synced.</p>
+    <ul class="paywall-features">
+      <li>Plan routes up to 14 days long with per-day alternatives</li>
+      <li>Accommodation &amp; wild-camp picker at each overnight stop</li>
+      <li>Water, shop &amp; landmark overlays along your route</li>
+      <li>GPX import from Garmin, Komoot, AllTrails &amp; more</li>
+      <li>Sync to phone — ready to walk immediately</li>
+      <li>Cloud backup of all your walks, routes &amp; trips</li>
+      <li>Offline maps, unlimited history, elevation profiles &amp; more</li>
+    </ul>
+    <a class="btn" href="https://amble.fit/pricing.html" target="_blank"
+      style="text-align:center;text-decoration:none">
+      Get Amble Pro — £2.99/month
+    </a>
+    <p class="paywall-price">or £24.99/year · cancel any time in App Store / Google Play</p>
+    <p class="paywall-signout" onclick="signOut()">Sign out</p>
+  </div>
+</div>
+
+<div class="app" id="app" style="display:none">
   <header class="topbar">
     <a href="/" class="topbar-brand">Amble</a>
     <span class="topbar-title">Multi-day trip planner</span>
@@ -655,9 +696,26 @@ async function checkSession() {
     onSignedIn(data.session.user);
   }
 }
-function onSignedIn(user) {
+async function onSignedIn(user) {
   document.getElementById('auth-panel').style.display = 'none';
   document.getElementById('user-display').textContent = user.email || 'Signed in';
+
+  // Check Pro status — query profiles.is_pro (same field as native proStatusService.ts)
+  let isPro = false;
+  try {
+    const { data } = await sb.from('profiles').select('is_pro').eq('id', user.id).maybeSingle();
+    isPro = data?.is_pro === true;
+  } catch (e) {
+    console.warn('[auth] Pro status check failed:', e);
+    // Fail closed — can't confirm Pro, show paywall
+    isPro = false;
+  }
+
+  if (isPro) {
+    document.getElementById('app').style.display = 'flex';
+  } else {
+    document.getElementById('paywall-panel').style.display = 'flex';
+  }
 }
 async function signInWith(provider) {
   document.getElementById('auth-err').textContent = '';
@@ -671,6 +729,8 @@ async function signInWith(provider) {
 }
 async function signOut() {
   await sb.auth.signOut();
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('paywall-panel').style.display = 'none';
   document.getElementById('auth-panel').style.display = 'flex';
   document.getElementById('user-display').textContent = '';
 }
@@ -1794,7 +1854,9 @@ ${tracks.join('\n')}
 </gpx>`;
 }
 
-function downloadTripGpx() {
+async function downloadTripGpx() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { toast('Sign in to export GPX', 'red'); return; }
   const gpx = buildTripGpx();
   if (!gpx) { toast('No skeleton to export', 'red'); return; }
   const safeName = (trip.name || 'amble-trip').replace(/[^a-z0-9\-_ ]/gi, '').replace(/\s+/g, '-').toLowerCase();
@@ -2319,9 +2381,7 @@ async function generateDayAlts(start, end, dayIdx) {
   const results = {};
 
   // Direct: BRouter hiking-mountain — general walking.
-  // pathPct left as undefined (shown as "—") to match native tripDayRouter.ts which also
-  // sets pathDensity:0 for BRouter direct routes (BRouter doesn't expose OSM way tags
-  // in a format the native graph model can use for path scoring).
+  // pathPct comes from parseBRouterPathDensity (messages[i][9] highway= tags).
   let directCoords = null;
   try {
     const r = await routeBRouterFull([start, end], 'hiking-mountain');
@@ -2398,7 +2458,7 @@ async function generateDayAlts(start, end, dayIdx) {
   if (Object.keys(results).length === 0) {
     const b = getB();
     const coords = trip.skeleton.coordinates.slice(b[dayIdx], b[dayIdx + 1] + 1);
-    results.direct = { coordinates: coords, distanceMetres: totalDist(coords), pathPct: 0.5, feel: 'easy', surface: 'mixed' };
+    results.direct = { coordinates: coords, distanceMetres: totalDist(coords), pathPct: null, feel: 'easy', surface: 'mixed' };
   }
 
   // Elevation: fire-and-forget, updates cards when ready
