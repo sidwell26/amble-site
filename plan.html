@@ -2133,20 +2133,23 @@ function renderSleepStep() {
   }
 }
 
-// Place faint preview markers for every accommodation option for night i
+// Place faint preview markers for every accommodation option for night i.
+// Clicking a map marker picks that accommodation — same as tapping the card.
 function placeAllAccomMarkers(i) {
   // Remove old previews for this night
   (accomAllMarkers[i] || []).forEach(m => m.remove());
   accomAllMarkers[i] = [];
   const pois = sleepPois[i] || [];
   const pick = sleepPicks[i];
-  pois.forEach(p => {
+  pois.forEach((p, j) => {
     const isPicked = pick && pick !== 'skip' && pick.id === p.id;
     if (isPicked) return; // picked one is handled by sleepMarkers[i]
     const el = document.createElement('div');
     el.style.cssText = 'font-size:18px;cursor:pointer;opacity:0.65;line-height:1;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.4))';
     el.textContent = p.emoji || '🏨';
     el.title = p.name;
+    // Clicking the map marker is the same as tapping the list card.
+    el.addEventListener('click', () => pickSleepByIdx(i, j));
     const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([p.coord.longitude, p.coord.latitude]).addTo(map);
     accomAllMarkers[i].push(m);
@@ -2285,6 +2288,19 @@ function getB() {
   return boundaries(trip.skeleton);
 }
 
+// Return the slice of skeleton coordinates for day dayIdx.
+// Used to anchor BRouter routes along the intended path rather than
+// letting it find a shortcut between the day's start and end points.
+function getDaySkeletonSegment(dayIdx) {
+  // Guard: skeleton may not yet exist (back-navigation race) or dayIdx may
+  // be out of range — return null so callers can fall back gracefully.
+  if (!trip || !trip.skeleton || !trip.skeleton.coordinates) return null;
+  const b = getB();
+  if (!b || dayIdx < 0 || dayIdx + 1 >= b.length) return null;
+  const coords = trip.skeleton.coordinates;
+  return coords.slice(b[dayIdx], b[dayIdx + 1] + 1);
+}
+
 function getDayBounds(dayIdx) {
   // For the START: day 0 starts at the trip start coord; subsequent days start
   // at the previous day's end (which may be a pinned accommodation coord).
@@ -2340,9 +2356,15 @@ async function renderDayPicker(dayIdx) {
 
   const { start, end } = getDayBounds(dayIdx);
 
+  // Extract the skeleton segment for this day so generateDayAlts can use it
+  // as the "direct" flavour and as a via-waypoint backbone for paths/scenic.
+  // Without this, BRouter routes start→end directly and finds a shortcut
+  // that's far shorter than the skeleton's 20km-per-day plan.
+  const skeletonSegment = getDaySkeletonSegment(dayIdx);
+
   // Generate 3 alternatives for this specific day's start→end bounds
   try {
-    const alts = await generateDayAlts(start, end, dayIdx);
+    const alts = await generateDayAlts(start, end, dayIdx, skeletonSegment);
     // Guard: if user navigated away while we were generating, discard
     if (currentDayIdx !== dayIdx) return;
     dayAlts[dayIdx] = alts;
@@ -2491,63 +2513,96 @@ function renderDayPickerBody(alts, dayIdx) {
 //   trekking        — long-distance trekking, strongly prefers footways/tracks
 //   safety          — safest / most road-like
 
-async function generateDayAlts(start, end, dayIdx) {
+// Sample N evenly-spaced waypoints from a coordinate array (including endpoints).
+// Used to anchor BRouter routes along the skeleton so it can't shortcut across
+// a multi-km day segment.
+function sampleSkeletonWaypoints(coords, n) {
+  if (!coords || coords.length < 2) return coords || [];
+  // Return a copy, not the original array, so callers can safely mutate it
+  if (n >= coords.length) return coords.slice();
+  const step = (coords.length - 1) / (n - 1);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(coords[Math.round(i * step)]);
+  return out;
+}
+
+async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const results = {};
 
-  // Direct: BRouter hiking-mountain — general walking.
-  // pathPct comes from parseBRouterPathDensity (messages[i][9] highway= tags).
-  let directCoords = null;
-  try {
-    const r = await routeBRouterFull([start, end], 'hiking-mountain');
-    directCoords = r.coordinates;
-    if (directCoords && directCoords.length >= 2) {
-      results.direct = {
-        coordinates: directCoords,
-        distanceMetres: totalDist(directCoords),
-        pathPct: r.pathPct,   // real value from messages[i][9] highway= parsing
-        feel: calcFeel(totalDist(directCoords), null),
-        surface: r.pathPct != null ? surfaceLabel(r.pathPct) : 'mixed',
-      };
-    }
-  } catch (e) { console.warn('[dayAlts] direct failed', e.message); }
+  // Direct: use the skeleton segment itself — it IS the planned path for this day.
+  // Re-routing start→end via BRouter would let BRouter find a shortcut (e.g. a
+  // 5km road for what the skeleton took 20km to walk). The skeleton already came
+  // from BRouter so it's routable; we just use it directly.
+  const skeletonDist = skeletonSegment ? totalDist(skeletonSegment) : 0;
+  let directCoords = skeletonSegment && skeletonSegment.length >= 2 ? skeletonSegment : null;
+  let directPathPct = null;
 
-  // Paths: BRouter with 'hiking-mountain' but adding noBike=true to prefer
-  // footways. Since public BRouter only has a few profiles, we use the same
-  // profile but add alternativeidx=1 (BRouter's second alternative is often
-  // a more path-heavy route). Fallback: just use the same direct route with
-  // a different via point to diversify.
+  // Try to get a richer pathPct for the direct route by asking BRouter with
+  // enough intermediate waypoints to force it along the skeleton. We sample
+  // ~5 waypoints (start + 3 interior + end) — enough to prevent shortcuts
+  // on a typical 10-25km day without hitting BRouter's waypoint limit.
+  if (skeletonSegment && skeletonSegment.length >= 2) {
+    try {
+      const wpts = sampleSkeletonWaypoints(skeletonSegment, Math.min(5, skeletonSegment.length));
+      const r = await routeBRouterFull(wpts, 'hiking-mountain');
+      if (r.coordinates && r.coordinates.length >= 2) {
+        directCoords = r.coordinates;
+        directPathPct = r.pathPct;
+      }
+    } catch (e) { console.warn('[dayAlts] direct BRouter failed, using skeleton segment', e.message); }
+    results.direct = {
+      coordinates: directCoords,
+      distanceMetres: totalDist(directCoords),
+      pathPct: directPathPct,
+      feel: calcFeel(totalDist(directCoords), null),
+      surface: directPathPct != null ? surfaceLabel(directPathPct) : 'mixed',
+    };
+  }
+
+  // Paths: BRouter alternativeidx=1 anchored to the skeleton — typically more
+  // off-road than the primary route. Same skeleton waypoints to stay on track.
   let pathsCoords = null, pathsPathPct = undefined;
-  try {
-    // BRouter alternativeidx=1 requests BRouter's second best route, which
-    // is typically more off-road than alternativeidx=0.
-    const lonlats = [start, end].map(w => `${w.longitude},${w.latitude}`).join('|');
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=1&format=geojson`;
-    const resp = await fetch(url);
-    if (resp.ok) {
-      const gj = await resp.json();
-      const feat = gj.features?.[0];
-      if (feat) {
-        const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-        const pp = parseBRouterPathDensity(feat.properties?.messages);
-        const distDiff = directCoords ? Math.abs(totalDist(coords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
-        const isDup = directCoords && distDiff < 0.04 && routeSimilarity(directCoords, coords) > 0.88;
-        if (!isDup && coords.length >= 2) {
-          pathsCoords = coords; pathsPathPct = pp;
-          results.paths = {
-            coordinates: pathsCoords,
-            distanceMetres: totalDist(pathsCoords),
-            pathPct: pathsPathPct,
-            feel: calcFeel(totalDist(pathsCoords), null),
-            surface: pathsPathPct != null ? surfaceLabel(pathsPathPct) : 'mixed',
-          };
+  if (skeletonSegment && skeletonSegment.length >= 2) {
+    try {
+      const wpts = sampleSkeletonWaypoints(skeletonSegment, Math.min(5, skeletonSegment.length));
+      const lonlats = wpts.map(w => `${w.longitude},${w.latitude}`).join('|');
+      const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=1&format=geojson`;
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const gj = await resp.json();
+        const feat = gj.features?.[0];
+        if (feat) {
+          const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+          const pp = parseBRouterPathDensity(feat.properties?.messages);
+          const distDiff = directCoords ? Math.abs(totalDist(coords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
+          const isDup = directCoords && distDiff < 0.04 && routeSimilarity(directCoords, coords) > 0.88;
+          if (!isDup && coords.length >= 2) {
+            pathsCoords = coords; pathsPathPct = pp;
+            results.paths = {
+              coordinates: pathsCoords,
+              distanceMetres: totalDist(pathsCoords),
+              pathPct: pathsPathPct,
+              feel: calcFeel(totalDist(pathsCoords), null),
+              surface: pathsPathPct != null ? surfaceLabel(pathsPathPct) : 'mixed',
+            };
+          }
         }
       }
-    }
-  } catch (e) { console.warn('[dayAlts] paths failed', e.message); }
+    } catch (e) { console.warn('[dayAlts] paths failed', e.message); }
+  }
 
-  // Scenic: route via a perpendicular midpoint offset — forces a geographical detour
+  // Scenic: route via a perpendicular midpoint offset — forces a geographical
+  // detour relative to the direct skeleton path. We still anchor to the
+  // skeleton midpoint so the total distance stays in the right ballpark.
   try {
+    const skeletonMid = skeletonSegment && skeletonSegment.length >= 2
+      ? skeletonSegment[Math.floor(skeletonSegment.length / 2)]
+      : { latitude: (start.latitude + end.latitude) / 2, longitude: (start.longitude + end.longitude) / 2 };
     for (const side of [1, -1]) {
+      // Use start→end as the base segment (not skeletonMid→end): the
+      // perpendicular offset is proportional to that segment length, so
+      // using the full start→end span gives a full-width scenic detour.
+      // Using skeletonMid→end as base halved the detour magnitude.
       const via = perpendicularMidpoint(start, end, DETOUR_FRACTION, side);
       const r = await routeBRouterFull([start, via, end], 'hiking-mountain');
       const scenicCoords = r.coordinates;
@@ -2568,11 +2623,10 @@ async function generateDayAlts(start, end, dayIdx) {
     }
   } catch (e) { console.warn('[dayAlts] scenic failed', e.message); }
 
-  // Must have at least one alt
+  // Must have at least one alt — fall back to raw skeleton slice
   if (Object.keys(results).length === 0) {
-    const b = getB();
-    const coords = trip.skeleton.coordinates.slice(b[dayIdx], b[dayIdx + 1] + 1);
-    results.direct = { coordinates: coords, distanceMetres: totalDist(coords), pathPct: null, feel: 'easy', surface: 'mixed' };
+    const seg = skeletonSegment || (() => { const b = getB(); return trip.skeleton.coordinates.slice(b[dayIdx], b[dayIdx + 1] + 1); })();
+    results.direct = { coordinates: seg, distanceMetres: totalDist(seg), pathPct: null, feel: 'easy', surface: 'mixed' };
   }
 
   // Elevation: fire-and-forget, updates cards when ready
@@ -3031,7 +3085,14 @@ async function replanWithVias() {
   const viaCoords = customWaypoints.map(w => w.coord);
 
   try {
-    const waypoints = [start, ...viaCoords, end];
+    // Anchor to skeleton so BRouter doesn't shortcut across the full day's
+    // distance. Sample up to 5 skeleton waypoints as intermediate anchors,
+    // then interleave any user-placed custom via-points.
+    // Without anchoring, BRouter finds the direct road between start and end
+    // which can be 3× shorter than the planned skeleton path.
+    const skeletonSegment = getDaySkeletonSegment(currentDayIdx);
+    const skeletonVias = sampleSkeletonWaypoints(skeletonSegment, 5).slice(1, -1); // interior only
+    const waypoints = [start, ...skeletonVias, ...viaCoords, end];
     const newCoords = await routeBRouter(waypoints);
     if (newCoords && currentDayAlts[pickedFlavour]) {
       currentDayAlts[pickedFlavour].coordinates = newCoords;
