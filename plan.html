@@ -971,12 +971,20 @@ async function routeBRouterFull(waypoints, profile = 'hiking-mountain', weighted
       .join('|');
     if (polylinesParam) params.set('polylines', polylinesParam);
   }
-  // Use POST when the query string is large (dense park fill grids can exceed 10KB).
-  // brouter.de supports POST with application/x-www-form-urlencoded body.
+  // brouter.de only supports GET — POST returns a 302 to the homepage.
+  // Cap polylines so the URL stays under ~7 KB (safe for all HTTP stacks).
+  const MAX_POLYLINES_GET = 60;
+  if (weightedPolylines.length > MAX_POLYLINES_GET) {
+    console.warn(`[BR] trimming polylines ${weightedPolylines.length} → ${MAX_POLYLINES_GET}`);
+    const trimmed = weightedPolylines.slice(0, MAX_POLYLINES_GET);
+    const trimmedParam = trimmed
+      .filter(p => p.coords.length >= 2 && isFinite(p.weight))
+      .map(p => p.coords.map(c => `${c.longitude.toFixed(6)},${c.latitude.toFixed(6)}`).join(',') + `,${p.weight}`)
+      .join('|');
+    if (trimmedParam) params.set('polylines', trimmedParam); else params.delete('polylines');
+  }
   const queryString = params.toString();
-  const r = queryString.length > 4000
-    ? await fetch(BROUTER_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: queryString })
-    : await fetch(`${BROUTER_URL}?${queryString}`);
+  const r = await fetch(`${BROUTER_URL}?${queryString}`);
   if (!r.ok) {
     const text = await r.text().catch(() => '');
     throw new Error(`Routing failed (${r.status})${text ? ': ' + text.slice(0, 80) : ''}`);
@@ -1001,7 +1009,7 @@ async function routeLoop(start, totalMetres, bearingDeg) {
   const radius = totalMetres / (2 * Math.PI);
   const anchors = [0, 1, 2].map(i => offsetCoord(start, radius, bearingDeg + i * 120));
   const waypoints = [start, ...anchors, start];
-  const { coordinates } = await routeBRouterFull(waypoints, 'trekking');
+  const { coordinates } = await routeBRouterFull(waypoints, 'hiking-mountain');
   return coordinates;
 }
 
@@ -1100,8 +1108,9 @@ async function routeLoopWithAnchors(start, anchors, allParks = [], extraPenaltie
   const waypoints = [start, ...anchors, start];
   const parkPolylines = parksToPolylines(allParks, start, anchors);
   const allPolylines = [...parkPolylines, ...extraPenalties];
-  // Return both coordinates AND pathPct so callers can use it for greeneryFraction.
-  return await routeBRouterFull(waypoints, 'trekking', allPolylines);
+  // hiking-mountain tolerates synthetic arc anchors in open fields; trekking
+  // requires strict long-distance path connectivity and rejects them.
+  return await routeBRouterFull(waypoints, 'hiking-mountain', allPolylines);
 }
 
 // Fetch named hiking/walking/foot route waypoints from Overpass.
@@ -1427,7 +1436,7 @@ async function planSkeletonCandidates(start, finish, isLoop, targetDayCount, tar
     for (const strat of p2pStrategies) {
       try {
         const waypoints = [start, ...strat.vias, finish];
-        const { coordinates: coords, pathPct } = await routeBRouterFull(waypoints, 'trekking', p2pAllPolylines);
+        const { coordinates: coords, pathPct } = await routeBRouterFull(waypoints, 'hiking-mountain', p2pAllPolylines);
         if (!coords || coords.length < 2) continue;
         const dist = totalDist(coords);
         const bearing = strat.vias.length > 0 ? bearingFromStart(start, strat.vias[0]) : 0;
@@ -2581,37 +2590,31 @@ async function findSettlementsAlongCorridorWeb(bbox) {
 }
 
 // Convert settlements to BRouter weighted polylines with penalty weight.
+// Cap at 25 settlements (cities/towns first by size) — 1 ring polyline each.
+// Diametral cross-lines removed: the ring alone is enough for BRouter to
+// penalise edges passing through a town, and the old 3-per-settlement
+// approach tripled the polyline count and caused URL overflow.
 function settlementsToPenaltyPolylinesWeb(settlements) {
   const out = [];
   const PENALTY_WEIGHT = 4;
-  for (const s of settlements) {
+  const MAX_SETTLEMENTS = 25;
+  const kindRank = k => k === 'city' ? 3 : k === 'town' ? 2 : k === 'suburb' ? 1 : 0;
+  const capped = [...settlements]
+    .sort((a, b) => kindRank(b.kind) - kindRank(a.kind) || b.radiusM - a.radiusM)
+    .slice(0, MAX_SETTLEMENTS);
+  for (const s of capped) {
     const ring = [];
     const cosLat = Math.cos((s.centre.latitude * Math.PI) / 180);
     const rLat = s.radiusM / 111320;
     const rLon = s.radiusM / (111320 * Math.max(0.1, cosLat));
-    for (let i = 0; i < 8; i++) {
-      const theta = (i * Math.PI * 2) / 8;
+    for (let i = 0; i <= 8; i++) {
+      const theta = ((i % 8) * Math.PI * 2) / 8;
       ring.push({
         latitude:  s.centre.latitude  + Math.cos(theta) * rLat,
         longitude: s.centre.longitude + Math.sin(theta) * rLon,
       });
     }
-    ring.push(ring[0]);
     out.push({ coords: ring, weight: PENALTY_WEIGHT });
-    out.push({
-      coords: [
-        { latitude: s.centre.latitude - rLat, longitude: s.centre.longitude },
-        { latitude: s.centre.latitude + rLat, longitude: s.centre.longitude },
-      ],
-      weight: PENALTY_WEIGHT,
-    });
-    out.push({
-      coords: [
-        { latitude: s.centre.latitude, longitude: s.centre.longitude - rLon },
-        { latitude: s.centre.latitude, longitude: s.centre.longitude + rLon },
-      ],
-      weight: PENALTY_WEIGHT,
-    });
   }
   return out;
 }
