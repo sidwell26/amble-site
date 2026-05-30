@@ -1164,8 +1164,10 @@ async function fetchTrailWaypoints(start, radiusDeg) {
 // all edges within the park without generating too many lines.
 function parksToPolylines(parks, start, anchors) {
   const result = [];
-  const GRID_SPACING_DEG = 0.027; // ~3 km
-  const MAX_LINES_PER_AXIS = 20;
+  // Hard cap at 6 lines per axis — same as tripSkeletonService.ts.
+  // Peak District at old MAX=20 generated 34 grid lines; at 6 it generates 10.
+  // Three parks × 11 polylines = 33 total, well under BRouter's 60-line GET cap.
+  const MAX_LINES_PER_AXIS = 6;
   const SAMPLES_PER_LINE = 20;
 
   // Corridor bbox covering start + anchors with generous padding.
@@ -1216,7 +1218,7 @@ function parksToPolylines(parks, start, anchors) {
 
     const interiorWeight = hasReal ? 0.05 : 0.4;
 
-    const nLat = Math.min(MAX_LINES_PER_AXIS, Math.ceil(dLat / GRID_SPACING_DEG));
+    const nLat = Math.min(MAX_LINES_PER_AXIS, Math.max(2, Math.ceil(dLat / 0.027)));
     for (let i = 1; i < nLat; i++) {
       const lat = p.minlat + (dLat * i) / nLat;
       if (!hasReal) {
@@ -1244,7 +1246,7 @@ function parksToPolylines(parks, start, anchors) {
         }
       }
     }
-    const nLon = Math.min(MAX_LINES_PER_AXIS, Math.ceil(dLon / GRID_SPACING_DEG));
+    const nLon = Math.min(MAX_LINES_PER_AXIS, Math.max(2, Math.ceil(dLon / 0.027)));
     for (let i = 1; i < nLon; i++) {
       const lon = p.minlon + (dLon * i) / nLon;
       if (!hasReal) {
@@ -3702,25 +3704,27 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
     ? fetchScenicParkVia(start, end).catch(() => null)
     : Promise.resolve(null);
 
-  // Fire all 3 BRouter requests + scenic via lookup in parallel.
-  // All routes use the trekking profile — most aggressive trail preference.
-  // Paths intentionally omits interior skeleton vias — mirrors the app fix in
-  // tripDayRouter.ts. When the same dense waypoints constrain direct AND paths,
-  // BRouter returns near-identical geometry and the dedup drops paths entirely.
-  // Using only [start, end] gives BRouter room to find a different trail corridor.
-  const pathsLonlats = `${start.longitude.toFixed(6)},${start.latitude.toFixed(6)}|${end.longitude.toFixed(6)},${end.latitude.toFixed(6)}`;
+  // Max route distance: 2.5× the crow-flies distance. Rejects BRouter
+  // returning a giant loop because a nudge point landed on the far side of
+  // a hill or private land. Mirrors tripDayRouter.ts MAX_DIST_RATIO.
+  const MAX_DIST_RATIO = 2.5;
+  const isSpike = (coords) => totalDist(coords) > directLen * MAX_DIST_RATIO;
+
+  // Paths: perpendicular nudge at 10% of direct distance (capped 1.5km),
+  // inserted at the quarter-point of the skeleton anchor list.
+  // Alt=1 was used before but just returned "next best road". The nudge
+  // pushes BRouter onto nearby footpaths without constraining it to the
+  // same tight corridor as Direct.
+  const pathsNudgeFrac = Math.min(0.10, 1500 / Math.max(1, directLen));
+  const pathsNudge = perpendicularMidpoint(start, end, pathsNudgeFrac, 1);
+  const qIdx = Math.max(1, Math.floor(aw.length / 4));
+  const pathsWaypoints = [...aw.slice(0, qIdx), pathsNudge, ...aw.slice(qIdx)];
 
   const [rDirect, rPaths, parkVia] = await Promise.all([
     // Direct: trekking primary route, skeleton anchored, park discount + town penalty
     routeBRouterFull(aw, 'trekking', dayAllPolylines).catch(() => null),
-    // Paths: trekking alternativeidx=1, start→end only (no interior vias).
-    // Wider search space → different bridleway/footpath corridor.
-    // Also reuses park discount + town penalty via routeBRouterFull.
-    (async () => {
-      try {
-        return await routeBRouterFull([start, end], 'trekking', dayAllPolylines, 1);
-      } catch { return null; }
-    })(),
+    // Paths: trekking + perpendicular nudge at quarter-point, alt=0.
+    routeBRouterFull(pathsWaypoints, 'trekking', dayAllPolylines, 0).catch(() => null),
     scenicViaPromise,
   ]);
 
@@ -3736,37 +3740,38 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const rScenic = await routeBRouterFull(scenicAW, 'trekking', dayAllPolylines).catch(() => null);
 
   // ── Direct ────────────────────────────────────────────────────────────────
-  if (rDirect?.coordinates?.length >= 2) {
+  if (rDirect?.coordinates?.length >= 2 && !isSpike(rDirect.coordinates)) {
     results.direct = makeAlt(rDirect.coordinates, rDirect.pathPct);
   } else if (skeletonSegment?.length >= 2) {
     results.direct = makeAlt(skeletonSegment, null);
   }
 
   // ── Paths ─────────────────────────────────────────────────────────────────
-  if (rPaths?.coordinates?.length >= 2 && !isDup(rPaths.coordinates)) {
+  if (rPaths?.coordinates?.length >= 2 && !isSpike(rPaths.coordinates) && !isDup(rPaths.coordinates)) {
     results.paths = makeAlt(rPaths.coordinates, rPaths.pathPct);
   } else {
-    // Fallback: perpendicular nudge with start→end only (same no-via logic).
-    // Routes through routeBRouterFull so day-level park discounts + town
-    // penalties still apply to the nudged variant.
+    // Fallback: opposite side with gentler nudge — first nudge may have landed
+    // on a hill / private land that caused a big loop.
     try {
-      const nudge = perpendicularMidpoint(start, end, 0.15, 1);
-      const rNudge = await routeBRouterFull([start, nudge, end], 'trekking', dayAllPolylines).catch(() => null);
-      if (rNudge?.coordinates?.length >= 2 && !isDup(rNudge.coordinates)) {
+      const nudge2 = perpendicularMidpoint(start, end, 0.08, -1);
+      const qIdx2 = Math.max(1, Math.floor(aw.length / 4));
+      const wpts2 = [...aw.slice(0, qIdx2), nudge2, ...aw.slice(qIdx2)];
+      const rNudge = await routeBRouterFull(wpts2, 'trekking', dayAllPolylines, 0).catch(() => null);
+      if (rNudge?.coordinates?.length >= 2 && !isSpike(rNudge.coordinates) && !isDup(rNudge.coordinates)) {
         results.paths = makeAlt(rNudge.coordinates, rNudge.pathPct);
       }
     } catch (e) { console.warn('[dayAlts] paths fallback failed', e.message); }
   }
 
   // ── Scenic ────────────────────────────────────────────────────────────────
-  if (rScenic?.coordinates?.length >= 2 && !isDup(rScenic.coordinates)) {
+  if (rScenic?.coordinates?.length >= 2 && !isSpike(rScenic.coordinates) && !isDup(rScenic.coordinates)) {
     results.scenic = makeAlt(rScenic.coordinates, rScenic.pathPct);
   } else if (directLen > 500) {
     // Fallback: other perpendicular side
     const otherVia = perpendicularMidpoint(start, end, DETOUR_FRACTION_SCENIC, -1);
     const awOther = [...aw.slice(0, midIdx), otherVia, ...aw.slice(midIdx)];
     const rOther = await routeBRouterFull(awOther, 'trekking', dayAllPolylines).catch(() => null);
-    if (rOther?.coordinates?.length >= 2 && !isDup(rOther.coordinates)) {
+    if (rOther?.coordinates?.length >= 2 && !isSpike(rOther.coordinates) && !isDup(rOther.coordinates)) {
       results.scenic = makeAlt(rOther.coordinates, rOther.pathPct);
     }
   }
