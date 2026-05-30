@@ -642,6 +642,9 @@ let activeCandidateIdx = 0;
 let pickingMode = null; // 'start'|'finish'|'stop'
 let stopPickDayIdx = null;
 let placeDebounce = {};
+// Incremented on each "Regenerate" press. Passed as rerollSeed to
+// planSkeletonCandidates so each regeneration rotates strategy slots.
+let rerollSeed = 0;
 
 function newTripObj() {
   return {
@@ -673,6 +676,8 @@ map.on('load', () => {
 
 map.on('click', e => {
   const { lng, lat } = e.lngLat;
+  // Dismiss accommodation confirmation popup on any map background click
+  if (sleepConfirmPopup) { closeSleepConfirm(); return; }
   // Waypoint mode takes precedence (used during day picker step)
   if (waypointMode) {
     onMapTapWaypoint(lat, lng);
@@ -954,10 +959,24 @@ function parseBRouterPathDensity(messages) {
   return totalMetres > 0 ? pathMetres / totalMetres : undefined;
 }
 
-async function routeBRouterFull(waypoints, profile = 'hiking-mountain') {
+// weightedPolylines: [{coords:[{lat,lon},...], weight}] — BRouter polylines= param.
+// weight < 1.0 = cost reduction (0.1 = 10× cheaper); weight > 1.0 = penalty.
+async function routeBRouterFull(waypoints, profile = 'hiking-mountain', weightedPolylines = [], alternativeIdx = 0) {
   const lonlats = waypoints.map(w => `${w.longitude},${w.latitude}`).join('|');
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson`;
-  const r = await fetch(url);
+  const params = new URLSearchParams({ lonlats, profile, alternativeidx: String(alternativeIdx), format: 'geojson' });
+  if (weightedPolylines.length > 0) {
+    const polylinesParam = weightedPolylines
+      .filter(p => p.coords.length >= 2 && isFinite(p.weight))
+      .map(p => p.coords.map(c => `${c.longitude.toFixed(6)},${c.latitude.toFixed(6)}`).join(',') + `,${p.weight}`)
+      .join('|');
+    if (polylinesParam) params.set('polylines', polylinesParam);
+  }
+  // Use POST when the query string is large (dense park fill grids can exceed 10KB).
+  // brouter.de supports POST with application/x-www-form-urlencoded body.
+  const queryString = params.toString();
+  const r = queryString.length > 4000
+    ? await fetch(BROUTER_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: queryString })
+    : await fetch(`${BROUTER_URL}?${queryString}`);
   if (!r.ok) {
     const text = await r.text().catch(() => '');
     throw new Error(`Routing failed (${r.status})${text ? ': ' + text.slice(0, 80) : ''}`);
@@ -982,7 +1001,8 @@ async function routeLoop(start, totalMetres, bearingDeg) {
   const radius = totalMetres / (2 * Math.PI);
   const anchors = [0, 1, 2].map(i => offsetCoord(start, radius, bearingDeg + i * 120));
   const waypoints = [start, ...anchors, start];
-  return routeBRouter(waypoints);
+  const { coordinates } = await routeBRouterFull(waypoints, 'trekking');
+  return coordinates;
 }
 
 // ── Elevation (Open-Elevation API, best-effort) ───────────────────────────────
@@ -1009,101 +1029,556 @@ async function fetchElevationStats(coords) {
   } catch { return null; }
 }
 
-// ── Multi-candidate skeleton generation ──────────────────────────────────────
-async function planSkeletonCandidates(start, finish, isLoop, targetDayCount, targetKmPerDay) {
-  const totalMetres = Math.max(1000, targetDayCount * targetKmPerDay * 1000);
-  const results = [];
+// ── Skeleton candidate helpers (mirrors tripSkeletonService.ts) ──────────────
 
-  if (isLoop) {
-    // Generate CANDIDATE_COUNT candidates at different bearings (0°, 90°, 180°, 270°).
-    // Each uses 3 anchor points arranged around the start — same approach as the native
-    // planSynthesizedLoop / planSkeletonCandidates logic.
-    const errors = [];
-    const attempts = await Promise.allSettled(
-      CANDIDATE_BEARINGS.map(async (bearing) => {
-        const coords = await routeLoop(start, totalMetres, bearing);
-        if (!coords || coords.length < 2) throw new Error('Empty route');
-        const dist = totalDist(coords);
-        // Distance gate: discard if wildly off target (same as native 60–180% window)
-        const frac = dist / totalMetres;
-        if (frac < 0.55 || frac > 2.0) throw new Error(`Route ${(dist/1000).toFixed(1)}km too far from target ${(totalMetres/1000).toFixed(1)}km`);
-        return { coords, dist, bearing };
-      })
-    );
+// N evenly-spaced anchor coordinates on a circle around `start` at a radius
+// sized so the inscribed polygon perimeter ≈ totalMetres. First anchor is
+// rotated by bearingDeg from north. Mirrors tripSkeletonService.buildAnchorVias.
+function buildAnchorVias(start, totalMetres, anchorCount, bearingDeg = 0) {
+  const radiusMetres = totalMetres / (2 * Math.PI);
+  const anchors = [];
+  for (let i = 0; i < anchorCount; i++) {
+    const angleDeg = bearingDeg + (360 * i) / anchorCount;
+    anchors.push(offsetCoord(start, radiusMetres, angleDeg));
+  }
+  return anchors;
+}
 
-    for (const r of attempts) {
-      if (r.status === 'fulfilled') results.push(r.value);
-      else errors.push(r.reason?.message ?? 'failed');
-    }
+// Bearing from start to target in degrees from north.
+function bearingFromStart(start, target) {
+  const dLon = target.longitude - start.longitude;
+  const dLat = target.latitude  - start.latitude;
+  let deg = (Math.atan2(dLon, dLat) * 180) / Math.PI;
+  if (deg < 0) deg += 360;
+  return deg;
+}
 
-    // If all compass bearings failed, try a simple 1-waypoint offset as a final fallback
-    if (results.length === 0) {
-      console.warn('[candidates] All compass attempts failed, trying simple offset fallback:', errors);
-      const mid = { latitude: start.latitude + 0.045, longitude: start.longitude };
-      const coords = await routeBRouter([start, mid, finish]);
-      if (coords && coords.length >= 2) {
-        results.push({ coords, dist: totalDist(coords), bearing: 0 });
+// Pick green anchor coordinates for one candidate variant. parks is the
+// bbox-format array returned by fetchParksForBbox (has minlat/maxlat/minlon/
+// maxlon/centreLat/centreLon). Uses bbox area as a proxy for polygon area.
+function pickGreenAnchorsWeb(start, parks, targetRadiusMetres, variantOffset) {
+  if (!parks.length) return [];
+  const idealRadius = targetRadiusMetres;
+  const minRadius   = idealRadius * 0.15;
+  const maxRadius   = idealRadius * 2.0;
+  const centre = p => ({ latitude: p.centreLat, longitude: p.centreLon });
+
+  const scored = parks.map(p => {
+    const bboxAreaSq = (p.maxlat - p.minlat) * (p.maxlon - p.minlon);
+    const d = haversine(start, centre(p));
+    if (d < minRadius || d > maxRadius) return null;
+    const distScore = 1 - Math.abs(d - idealRadius) / idealRadius;
+    return { park: p, score: bboxAreaSq * Math.max(0.05, distScore) };
+  }).filter(s => s !== null && s.score > 0).sort((a, b) => b.score - a.score);
+
+  if (!scored.length) return [];
+
+  const picks = [];
+  for (let i = 0; i < 3 && i < scored.length; i++) {
+    picks.push(centre(scored[(variantOffset + i) % scored.length].park));
+  }
+
+  // Sort anchors by bearing from start so the loop doesn't backtrack.
+  picks.sort((a, b) => bearingFromStart(start, a) - bearingFromStart(start, b));
+  return picks;
+}
+
+// Descriptive label for a candidate strategy before greenery sort.
+function strategyLabel(strategy, bearingDeg) {
+  if (strategy === 'green-main')  return `Through the parks · ${bearingLabel(bearingDeg)}`;
+  if (strategy === 'green-left')  return `Wider arc · ${bearingLabel(bearingDeg)}`;
+  if (strategy === 'green-right') return `Alt route · ${bearingLabel(bearingDeg)}`;
+  if (strategy === 'green-deep')  return `Into the wilds · ${bearingLabel(bearingDeg)}`;
+  if (strategy && strategy.startsWith('green-var')) return `Loop variant · ${bearingLabel(bearingDeg)}`;
+  if (strategy && strategy.startsWith('bearing'))   return `${bearingLabel(bearingDeg)} loop`;
+  return bearingLabel(bearingDeg);
+}
+
+// Route a loop through an array of explicit anchor waypoints. Per-candidate
+// polylines are built here (filtered to parks in the start→anchor corridor).
+async function routeLoopWithAnchors(start, anchors, allParks = [], extraPenalties = []) {
+  const waypoints = [start, ...anchors, start];
+  const parkPolylines = parksToPolylines(allParks, start, anchors);
+  const allPolylines = [...parkPolylines, ...extraPenalties];
+  // Return both coordinates AND pathPct so callers can use it for greeneryFraction.
+  return await routeBRouterFull(waypoints, 'trekking', allPolylines);
+}
+
+// Fetch named hiking/walking/foot route waypoints from Overpass.
+// These are guaranteed to lie on actual mapped footpaths inside green areas.
+async function fetchTrailWaypoints(start, radiusDeg) {
+  const minLat = start.latitude  - radiusDeg, maxLat = start.latitude  + radiusDeg;
+  const minLon = start.longitude - radiusDeg, maxLon = start.longitude + radiusDeg;
+  const bbox = `${minLat},${minLon},${maxLat},${maxLon}`;
+  // Hiking/walking/foot routes ONLY. National park boundary relations were
+  // previously included but their member ways are the park perimeter (roads,
+  // walls, field boundaries) — not footpaths inside the park. Perimeter waypoints
+  // caused BRouter to snap to boundary roads rather than internal footpaths.
+  const q = `[out:json][timeout:20];(
+    relation["route"~"^(hiking|walking|foot)$"]["name"](${bbox});
+  );out geom;`;
+  const data = await overpassQuery(q);
+  if (!data) return [];
+
+  const waypoints = [];
+  for (const el of (data.elements || [])) {
+    if (el.type !== 'relation' || !Array.isArray(el.members)) continue;
+    const name = el.tags?.name || 'Trail';
+    const allVerts = [];
+    for (const m of el.members) {
+      if (m.type !== 'way' || !Array.isArray(m.geometry)) continue;
+      for (const g of m.geometry) {
+        if (typeof g.lat === 'number') allVerts.push({ latitude: g.lat, longitude: g.lon });
       }
     }
-  } else {
-    // Point-to-point: generate up to 3 variants — direct + two scenic detours
-    // via perpendicular midpoint offsets so the user can pick their preferred path.
-    const direct = await routeBRouter([start, finish]);
-    if (!direct || direct.length < 2) throw new Error('No route found between start and finish');
-    results.push({ coords: direct, dist: totalDist(direct), bearing: 0 });
+    if (allVerts.length < 2) continue;
+    const step = Math.max(1, Math.floor(allVerts.length / 4));
+    for (let i = 0; i < allVerts.length; i += step) {
+      const c = allVerts[i];
+      const dist = haversine(start, c);
+      waypoints.push({ coord: c, trailName: name, distanceMetres: dist });
+    }
+  }
+  waypoints.sort((a, b) => a.distanceMetres - b.distanceMetres);
+  console.log(`[trails] ${waypoints.length} trail waypoints from ${(data.elements||[]).length} relations`);
+  return waypoints;
+}
 
-    // Try scenic variants via a perpendicular midpoint offset (left + right of the line).
-    const midLat = (start.latitude + finish.latitude) / 2;
-    const midLon = (start.longitude + finish.longitude) / 2;
-    const dLat = finish.latitude - start.latitude;
-    const dLon = finish.longitude - start.longitude;
-    const len = Math.sqrt(dLat * dLat + dLon * dLon) || 1;
-    const OFFSET = 0.03; // ~3km perpendicular offset in degrees
-    for (const side of [1, -1]) {
+// Build per-candidate BRouter weighted polylines, filtered to parks in the
+// start→anchors corridor. Mirrors parksToWeightedPolylines in tripSkeletonService.ts.
+//
+// Corridor filtering is critical: passing all parks globally caused BRouter to
+// route toward whichever park bbox was cheapest regardless of direction,
+// pulling "Through the parks · NE" toward parks that were actually south/west.
+//
+// Grid spacing ~3km (0.027°) — coarser than before but still influences
+// all edges within the park without generating too many lines.
+function parksToPolylines(parks, start, anchors) {
+  const result = [];
+  const GRID_SPACING_DEG = 0.027; // ~3 km
+  const MAX_LINES_PER_AXIS = 20;
+  const SAMPLES_PER_LINE = 20;
+
+  // Corridor bbox covering start + anchors with generous padding.
+  const allPts = [start, ...(anchors || [])];
+  let corrMinLat = Math.min(...allPts.map(p => p.latitude));
+  let corrMaxLat = Math.max(...allPts.map(p => p.latitude));
+  let corrMinLon = Math.min(...allPts.map(p => p.longitude));
+  let corrMaxLon = Math.max(...allPts.map(p => p.longitude));
+  const pad = 0.3; // ~33 km margin each side
+  corrMinLat -= pad; corrMaxLat += pad;
+  corrMinLon -= pad; corrMaxLon += pad;
+
+  for (const p of parks) {
+    const centreLat = (p.minlat + p.maxlat) / 2;
+    const centreLon = (p.minlon + p.maxlon) / 2;
+
+    // Skip parks outside the start→anchor corridor.
+    if (centreLat < corrMinLat || centreLat > corrMaxLat ||
+        centreLon < corrMinLon || centreLon > corrMaxLon) continue;
+
+    const dLat = p.maxlat - p.minlat;
+    const dLon = p.maxlon - p.minlon;
+    const hasReal = p.boundaryIsRealGeometry && Array.isArray(p.boundary) && p.boundary.length >= 6;
+
+    // 1. Boundary ring. Real ring at weight 0.1; bbox fallback at 0.5 (weak
+    //    discount — a bbox includes non-park land like towns inside the
+    //    national-park rectangle, so a strong discount there would actively
+    //    encourage routing through them).
+    if (hasReal) {
+      // Subsample the real ring to ~40 points to keep the URL manageable.
+      const step = Math.max(1, Math.floor(p.boundary.length / 40));
+      result.push({ coords: p.boundary.filter((_, i) => i % step === 0), weight: 0.1 });
+    } else {
+      result.push({
+        coords: [
+          { latitude: p.minlat, longitude: p.minlon },
+          { latitude: p.minlat, longitude: p.maxlon },
+          { latitude: p.maxlat, longitude: p.maxlon },
+          { latitude: p.maxlat, longitude: p.minlon },
+          { latitude: p.minlat, longitude: p.minlon },
+        ],
+        weight: 0.5,
+      });
+    }
+
+    // 2. Interior fill grid — only for parks > ~2km span.
+    if (dLat * 111_000 < 2000 || dLon * 111_000 < 2000) continue;
+
+    const interiorWeight = hasReal ? 0.05 : 0.4;
+
+    const nLat = Math.min(MAX_LINES_PER_AXIS, Math.ceil(dLat / GRID_SPACING_DEG));
+    for (let i = 1; i < nLat; i++) {
+      const lat = p.minlat + (dLat * i) / nLat;
+      if (!hasReal) {
+        result.push({ coords: [{ latitude: lat, longitude: p.minlon }, { latitude: lat, longitude: p.maxlon }], weight: interiorWeight });
+        continue;
+      }
+      // Sample the line; emit only segments whose midpoint is INSIDE the polygon.
+      let segStart = null;
+      for (let s = 0; s <= SAMPLES_PER_LINE; s++) {
+        const lonHere = p.minlon + (s / SAMPLES_PER_LINE) * dLon;
+        const inside = pointInPolygonWeb({ latitude: lat, longitude: lonHere }, p.boundary);
+        if (inside && segStart === null) segStart = { latitude: lat, longitude: lonHere };
+        if (!inside && segStart !== null) {
+          const segEnd = { latitude: lat, longitude: lonHere };
+          if (Math.abs(segEnd.longitude - segStart.longitude) * 111_000 > 200) {
+            result.push({ coords: [segStart, segEnd], weight: interiorWeight });
+          }
+          segStart = null;
+        }
+      }
+      if (segStart !== null) {
+        const segEnd = { latitude: lat, longitude: p.maxlon };
+        if (Math.abs(segEnd.longitude - segStart.longitude) * 111_000 > 200) {
+          result.push({ coords: [segStart, segEnd], weight: interiorWeight });
+        }
+      }
+    }
+    const nLon = Math.min(MAX_LINES_PER_AXIS, Math.ceil(dLon / GRID_SPACING_DEG));
+    for (let i = 1; i < nLon; i++) {
+      const lon = p.minlon + (dLon * i) / nLon;
+      if (!hasReal) {
+        result.push({ coords: [{ latitude: p.minlat, longitude: lon }, { latitude: p.maxlat, longitude: lon }], weight: interiorWeight });
+        continue;
+      }
+      let segStart = null;
+      for (let s = 0; s <= SAMPLES_PER_LINE; s++) {
+        const latHere = p.minlat + (s / SAMPLES_PER_LINE) * dLat;
+        const inside = pointInPolygonWeb({ latitude: latHere, longitude: lon }, p.boundary);
+        if (inside && segStart === null) segStart = { latitude: latHere, longitude: lon };
+        if (!inside && segStart !== null) {
+          const segEnd = { latitude: latHere, longitude: lon };
+          if (Math.abs(segEnd.latitude - segStart.latitude) * 111_000 > 200) {
+            result.push({ coords: [segStart, segEnd], weight: interiorWeight });
+          }
+          segStart = null;
+        }
+      }
+      if (segStart !== null) {
+        const segEnd = { latitude: p.maxlat, longitude: lon };
+        if (Math.abs(segEnd.latitude - segStart.latitude) * 111_000 > 200) {
+          result.push({ coords: [segStart, segEnd], weight: interiorWeight });
+        }
+      }
+    }
+  }
+  return result;
+}
+
+// Compute the bearing from start toward the most significant nearby green area.
+// Mirrors parkWeightedBearing() in tripSkeletonService.ts.
+// parks entries here have {minlat, maxlat, minlon, maxlon, centreLat, centreLon}.
+function parkWeightedBearingWeb(start, parks, anchorRadius) {
+  if (!parks.length) return 0;
+  const MAX_DIST = anchorRadius * 4;
+  let sumSin = 0, sumCos = 0, totalW = 0;
+  for (const p of parks) {
+    const cLat = p.centreLat ?? (p.minlat + p.maxlat) / 2;
+    const cLon = p.centreLon ?? (p.minlon + p.maxlon) / 2;
+    const dLat = (cLat - start.latitude) * 111320;
+    const cosLat = Math.cos(start.latitude * Math.PI / 180);
+    const dLon = (cLon - start.longitude) * 111320 * cosLat;
+    const d = Math.sqrt(dLat * dLat + dLon * dLon);
+    if (d > MAX_DIST) continue;
+    const bboxAreaKm2 = (p.maxlat - p.minlat) * 111.32 * (p.maxlon - p.minlon) * 111.32 * cosLat;
+    const distClamped = Math.max(1000, d);
+    const weight = bboxAreaKm2 / (distClamped * distClamped / 1_000_000);
+    const b = bearingFromStart(start, { latitude: cLat, longitude: cLon });
+    const rad = b * Math.PI / 180;
+    sumSin += Math.sin(rad) * weight;
+    sumCos += Math.cos(rad) * weight;
+    totalW += weight;
+  }
+  if (totalW === 0) return 0;
+  let mean = Math.atan2(sumSin / totalW, sumCos / totalW) * 180 / Math.PI;
+  return mean < 0 ? mean + 360 : mean;
+}
+
+// Clamp bearing to within maxDelta of reference (circular arithmetic).
+function clampBearingWeb(bearing, reference, maxDelta) {
+  let diff = ((bearing - reference + 540) % 360) - 180;
+  if (diff >  maxDelta) diff =  maxDelta;
+  if (diff < -maxDelta) diff = -maxDelta;
+  return (reference + diff + 360) % 360;
+}
+
+// Place 3 synthetic anchor coords forming a teardrop arc toward arcBearing.
+// primaryBearing is the overall park direction; anchors are clamped to ≤65°
+// of it so a LEAN-shifted arcBearing can't drift an anchor into road territory.
+// Mirrors buildGreenArc() in tripSkeletonService.ts.
+function buildGreenArcWeb(start, arcBearing, radius, seedOffset, primaryBearing) {
+  const ARC = 35;
+  const CLAMP = 65;
+  const ref = primaryBearing != null ? primaryBearing : arcBearing;
+  const jitter = (seedOffset - 3) * 3; // -9° to +9°
+  const raw = [
+    (arcBearing - ARC + jitter + 360) % 360,
+    (arcBearing + jitter + 360) % 360,
+    (arcBearing + ARC + jitter + 360) % 360,
+  ];
+  const slots = raw.map(b => clampBearingWeb(b, ref, CLAMP));
+  return slots.map(b => offsetCoord(start, radius, b));
+}
+
+// ── Multi-candidate skeleton generation ──────────────────────────────────────
+// rerollSeed is incremented on each "Regenerate" so each press produces a
+// distinct rotation of the 4 named strategies.
+async function planSkeletonCandidates(start, finish, isLoop, targetDayCount, targetKmPerDay, rerollSeed = 0) {
+  const totalMetres = Math.max(1000, targetDayCount * targetKmPerDay * 1000);
+  // Corrected anchor radius: for N=3 anchor points, use the triangle circumradius
+  // formula R = totalMetres / (3 × 2 × sin(π/3)) ≈ totalMetres / 5.196.
+  // The old formula (totalMetres / 2π) was 21% too small — anchors barely reached
+  // the southern edge of the Peak District from Ashbourne.
+  const N_ANCHORS = 3;
+  const anchorRadius = totalMetres / (N_ANCHORS * 2 * Math.sin(Math.PI / N_ANCHORS));
+  const seed = rerollSeed ?? 0;
+
+  if (!isLoop) {
+    // ── Point-to-point: fetch green parks along corridor, then route ────────
+    // Mirrors the native planSkeletonCandidates P2P branch: fetch parks near
+    // the corridor midpoint, pick ones that lie between start and finish, and
+    // use them as forced intermediate waypoints for each candidate. BRouter's
+    // trekking profile already prefers paths; adding a green via ensures the
+    // route is pulled through natural areas instead of following the A-road.
+    const directDistP2P = haversine(start, finish);
+    const midP2P = { latitude: (start.latitude + finish.latitude) / 2, longitude: (start.longitude + finish.longitude) / 2 };
+
+    // Fetch parks + settlements near the corridor in parallel
+    const fetchRadiusDegP2P = Math.min(80_000, directDistP2P * 0.7) / 111_000;
+    const p2pBbox = {
+      minLat: Math.min(start.latitude,  finish.latitude)  - fetchRadiusDegP2P,
+      maxLat: Math.max(start.latitude,  finish.latitude)  + fetchRadiusDegP2P,
+      minLon: Math.min(start.longitude, finish.longitude) - fetchRadiusDegP2P,
+      maxLon: Math.max(start.longitude, finish.longitude) + fetchRadiusDegP2P,
+    };
+    let p2pParks = [];
+    let p2pSettlements = [];
+    try {
+      [p2pParks, p2pSettlements] = await Promise.all([
+        fetchParksForBbox(p2pBbox.minLat, p2pBbox.minLon, p2pBbox.maxLat, p2pBbox.maxLon).catch(() => []),
+        findSettlementsAlongCorridorWeb(p2pBbox).catch(() => []),
+      ]);
+    } catch { /* no parks/settlements — fall back to direct only */ }
+
+    // Upgrade top parks to real polygon geometry so the cost-discount grid
+    // clips to the actual outline (prevents bbox-of-Peak-District including
+    // Buxton from being routed through cheaply).
+    if (p2pParks.length > 0) {
+      const sortedP2P = [...p2pParks].sort((a, b) => {
+        const areaA = (a.maxlat - a.minlat) * (a.maxlon - a.minlon);
+        const areaB = (b.maxlat - b.minlat) * (b.maxlon - b.minlon);
+        return areaB - areaA;
+      });
+      const topP2P = sortedP2P.slice(0, 5);
+      const geoP2P = await fetchParkGeometryByIdsWeb(topP2P).catch(() => new Map());
+      for (const p of p2pParks) {
+        const ring = geoP2P.get(p.id);
+        if (ring && ring.length >= 3) {
+          p.boundary = ring;
+          p.boundaryIsRealGeometry = true;
+        }
+      }
+    }
+
+    // Score parks by corridor alignment (close to start→finish line) and size
+    const cosLatP2P = Math.cos((midP2P.latitude * Math.PI) / 180);
+    const dxLine = (finish.longitude - start.longitude) * cosLatP2P;
+    const dyLine = finish.latitude - start.latitude;
+    const lineLen = Math.sqrt(dxLine * dxLine + dyLine * dyLine) || 1;
+
+    const scoredP2P = p2pParks.map(p => {
+      // Use centreLat/centreLon from fetchParksForBbox.
+      const pcLat = p.centreLat ?? (p.minlat + p.maxlat) / 2;
+      const pcLon = p.centreLon ?? (p.minlon + p.maxlon) / 2;
+      const dxP = (pcLon - start.longitude) * cosLatP2P;
+      const dyP = pcLat - start.latitude;
+      const perpDeg = Math.abs(dxP * (-dyLine / lineLen) + dyP * (dxLine / lineLen));
+      const perpM = perpDeg * 111_320;
+      const alongM = (dxP * (dxLine / lineLen) + dyP * (dyLine / lineLen)) * 111_320;
+      if (perpM > directDistP2P * 0.5) return null;
+      if (alongM < 0 || alongM > directDistP2P * 1.1) return null;
+      const area = (p.maxlat - p.minlat) * (p.maxlon - p.minlon);
+      return { park: p, centre: { latitude: pcLat, longitude: pcLon }, score: area / Math.max(1e-9, perpM) };
+    }).filter(x => x !== null).sort((a, b) => b.score - a.score);
+
+    const p2pSettlementPenalties = settlementsToPenaltyPolylinesWeb(p2pSettlements);
+    console.log(`[candidates-p2p] direct=${(directDistP2P/1000).toFixed(1)}km, ${scoredP2P.length} corridor parks, ${p2pSettlements.length} settlements`);
+
+    // Strategies: direct (park discounts + town penalties) + up to 3 green corridor variants
+    const seedOffset = ((rerollSeed ?? 0) % 8 + 8) % 8;
+    const p2pStrategies = [{ name: 'direct', vias: [] }];
+    for (let i = 0; i < Math.min(3, scoredP2P.length); i++) {
+      const parkIdx = (i + seedOffset) % scoredP2P.length;
+      const via = scoredP2P[parkIdx].centre;
+      // Only include via if it doesn't create a crazy detour (≤60% extra distance)
+      if (haversine(start, via) + haversine(via, finish) <= directDistP2P * 1.6) {
+        p2pStrategies.push({ name: `green-${i}`, vias: [via] });
+      }
+    }
+
+    // Park polylines computed once (shared shape across all strategies);
+    // settlement penalties always applied so direct route doesn't shortcut
+    // through a town centre even when no green via is added.
+    const p2pParkPolylines = parksToPolylines(p2pParks, start, [finish]);
+    const p2pAllPolylines = [...p2pParkPolylines, ...p2pSettlementPenalties];
+
+    const results = [];
+    for (const strat of p2pStrategies) {
       try {
-        const via = {
-          latitude:  midLat + (-dLon / len) * Math.abs(dLat + dLon) * OFFSET * side,
-          longitude: midLon + ( dLat / len) * Math.abs(dLat + dLon) * OFFSET * side,
-        };
-        const variant = await routeBRouter([start, via, finish]);
-        if (!variant || variant.length < 2) continue;
-        results.push({ coords: variant, dist: totalDist(variant), bearing: side === 1 ? 90 : 270 });
-      } catch { /* variant failed — continue with direct only */ }
+        const waypoints = [start, ...strat.vias, finish];
+        const { coordinates: coords, pathPct } = await routeBRouterFull(waypoints, 'trekking', p2pAllPolylines);
+        if (!coords || coords.length < 2) continue;
+        const dist = totalDist(coords);
+        const bearing = strat.vias.length > 0 ? bearingFromStart(start, strat.vias[0]) : 0;
+        results.push({ coords, dist, bearing, strategy: strat.name, pathPct: pathPct ?? 0 });
+      } catch { /* variant failed */ }
+    }
+
+    if (results.length === 0) throw new Error('No route found between start and finish');
+
+    const deduped = [];
+    for (const r of results) {
+      if (!deduped.find(d => routeSimilarity(d.coords, r.coords) > 0.85)) deduped.push(r);
+    }
+    return deduped.map(({ coords, dist, bearing, strategy, pathPct }, i) => ({
+      skeleton: { coordinates: coords, distanceMetres: dist, dayEnds: equalDayEnds(coords, targetDayCount) },
+      bearing, greeneryFraction: pathPct,
+      label: i === 0 ? 'Direct' : `Green corridor ${i}`,
+      kmTotal: (dist / 1000).toFixed(1),
+    }));
+  }
+
+  // ── Loop: fetch parks + settlements in parallel ─────────────────────────
+  const fetchRadiusDeg = Math.min(80_000, totalMetres * 0.7) / 111_000;
+  const settlementBbox = {
+    minLat: start.latitude  - fetchRadiusDeg, maxLat: start.latitude  + fetchRadiusDeg,
+    minLon: start.longitude - fetchRadiusDeg, maxLon: start.longitude + fetchRadiusDeg,
+  };
+  let parks = [];
+  let settlements = [];
+  try {
+    [parks, settlements] = await Promise.all([
+      fetchParksForBbox(
+        start.latitude  - fetchRadiusDeg, start.longitude - fetchRadiusDeg,
+        start.latitude  + fetchRadiusDeg, start.longitude + fetchRadiusDeg,
+      ).catch(() => []),
+      findSettlementsAlongCorridorWeb(settlementBbox).catch(() => []),
+    ]);
+  } catch { /* fallback: no parks/settlements → compass default */ }
+
+  // Upgrade the top 5 parks (by bbox area) to true polygon geometry so the
+  // cost-discount grid clips to the actual outline. Without this, a national
+  // park's bbox covers towns INSIDE the rectangle (Buxton inside the Peak
+  // District bbox) which would be discounted equally with moorland.
+  if (parks.length > 0) {
+    const sorted = [...parks].sort((a, b) => {
+      const areaA = (a.maxlat - a.minlat) * (a.maxlon - a.minlon);
+      const areaB = (b.maxlat - b.minlat) * (b.maxlon - b.minlon);
+      return areaB - areaA;
+    });
+    const topForGeom = sorted.slice(0, 5);
+    const geo = await fetchParkGeometryByIdsWeb(topForGeom).catch(() => new Map());
+    for (const p of parks) {
+      const ring = geo.get(p.id);
+      if (ring && ring.length >= 3) {
+        p.boundary = ring;
+        p.boundaryIsRealGeometry = true;
+      }
+    }
+  }
+
+  const settlementPenalties = settlementsToPenaltyPolylinesWeb(settlements);
+  const upgradedCount = parks.filter(p => p.boundaryIsRealGeometry).length;
+  console.log(`[candidates] ${parks.length} parks (${upgradedCount} with real geometry), ${settlements.length} settlements (${settlementPenalties.length} penalty polylines)`);
+
+  // Primary bearing = weighted direction toward the nearest large green areas.
+  // This replaces trail-density counting which was broken:
+  //   - From Bakewell (already inside Peaks), trails go equally E toward Derby
+  //     and NW into the park interior — so E "won" and routed to Nottingham.
+  //   - Trail Overpass query can time out → 0 trails → random direction.
+  // Park bboxes never time out (out bb) and directly encode where the green is.
+  const primary = parkWeightedBearingWeb(start, parks, anchorRadius);
+  const seedOffset = ((seed % 8) + 8) % 8;
+  const LEAN = 20; // 20° (was 30°) — keeps outermost anchor ≤55° from primary
+
+  console.log(`[candidates] primaryBearing=${primary.toFixed(0)}° (${bearingLabel(primary)}), seed=${seed}`);
+
+  const strategies = [
+    { name: 'green-main',  anchors: buildGreenArcWeb(start, primary,                      anchorRadius,       seedOffset, primary) },
+    { name: 'green-left',  anchors: buildGreenArcWeb(start, (primary - LEAN + 360) % 360, anchorRadius * 1.4, seedOffset, primary) },
+    { name: 'green-right', anchors: buildGreenArcWeb(start, (primary + LEAN) % 360,       anchorRadius * 1.4, seedOffset, primary) },
+    { name: 'green-deep',  anchors: buildGreenArcWeb(start, primary,                      anchorRadius * 1.8, seedOffset, primary) },
+  ];
+
+  // Route all 4 strategies in parallel — each gets corridor-filtered polylines.
+  const attempts = await Promise.allSettled(
+    strategies.map(async ({ name, anchors }) => {
+      const { coordinates: coords, pathPct } = await routeLoopWithAnchors(start, anchors, parks, settlementPenalties);
+      if (!coords || coords.length < 2) throw new Error('Empty route');
+      const dist = totalDist(coords);
+      const frac = dist / totalMetres;
+      // Loose gate — national park terrain is legitimately longer (switchbacks,
+      // ridges). MAX 2.5× allows deep wilderness routes; hard-drop at 0.4×.
+      if (frac < 0.4) throw new Error(`${(dist/1000).toFixed(1)}km far too short vs target ${(totalMetres/1000).toFixed(1)}km`);
+      if (frac < 0.5 || frac > 2.5) throw new Error(`${(dist/1000).toFixed(1)}km outside acceptable range vs target ${(totalMetres/1000).toFixed(1)}km`);
+      const bearing = anchors.length > 0 ? bearingFromStart(start, anchors[0]) : 0;
+      return { coords, dist, bearing, strategy: name, pathPct: pathPct ?? 0 };
+    })
+  );
+
+  const results = [];
+  for (const r of attempts) {
+    if (r.status === 'fulfilled') results.push(r.value);
+    else console.warn('[candidates] strategy failed:', r.reason?.message);
+  }
+
+  // Final fallback if all strategies failed.
+  if (results.length === 0) {
+    console.warn('[candidates] All strategies failed, trying compass fallback');
+    for (const b of [0, 90, 180, 270]) {
+      try {
+        const coords = await routeLoop(start, totalMetres, b);
+        if (coords && coords.length >= 2) {
+          results.push({ coords, dist: totalDist(coords), bearing: b, strategy: `bearing-${b}`, pathPct: 0 });
+          break;
+        }
+      } catch {}
     }
   }
 
   if (results.length === 0) throw new Error('Could not generate any skeleton candidates');
 
-  // Deduplicate candidates — discard a route only when it shares >85% of
-  // sampled points with an already-accepted candidate. 0.7 was too aggressive
-  // and collapsed genuinely distinct compass-bearing loops into a single result.
+  // Deduplicate.
   const deduped = [];
   for (const r of results) {
-    const dup = deduped.find(d => routeSimilarity(d.coords, r.coords) > 0.85);
-    if (!dup) deduped.push(r);
+    if (!deduped.find(d => routeSimilarity(d.coords, r.coords) > 0.85)) deduped.push(r);
   }
 
-  // Build candidate objects with day-end cuts
-  const built = deduped.map(({ coords, dist, bearing }, i) => {
+  const built = deduped.map(({ coords, dist, bearing, strategy, pathPct }) => {
     const dayEnds = equalDayEnds(coords, targetDayCount);
     return {
       skeleton: { coordinates: coords, distanceMetres: dist, dayEnds },
       bearing,
-      greeneryFraction: 0, // scoring not available in browser without Overpass; will be filled in
-      label: isLoop ? bearingLabel(bearing) : (i === 0 ? 'Direct' : i === 1 ? 'Via West' : 'Via East'),
+      // pathPct from BRouter = fraction on footway/path/track — ground truth for nature%.
+      greeneryFraction: pathPct,
+      label: strategyLabel(strategy, bearing),
       kmTotal: (dist / 1000).toFixed(1),
     };
   });
 
-  // Label the first one as the primary if we have multiples
-  if (built.length > 1) {
-    built[0].label = `${bearingLabel(built[0].bearing)} · Main`;
-  }
-
+  console.log(`[candidates] seed=${seed} ${built.length} candidates: ${built.map(c => c.label).join(' / ')}`);
   return built;
 }
 
 // ── Generate skeleton ─────────────────────────────────────────────────────────
+// Generation counter — incremented on every Regenerate press. The
+// scoreAllCandidates callback captures the value at the time of its call;
+// if it has changed by the time the Overpass fetch completes the user has
+// already regenerated, so we discard the stale result instead of mutating
+// the new candidates array.
+let skeletonGeneration = 0;
+
 async function generateSkeleton() {
   document.getElementById('gen-err').textContent = '';
   trip.name = document.getElementById('trip-name').value.trim() || 'My trip';
@@ -1114,14 +1589,20 @@ async function generateSkeleton() {
   if (!trip.finish && !trip.isLoop) { document.getElementById('gen-err').textContent = 'Set a finish point first.'; return; }
 
   const finish = trip.isLoop ? trip.start : trip.finish;
+  // Increment seed BEFORE planning so each call (including the first) uses
+  // a distinct strategy rotation.
+  rerollSeed += 1;
+  // Bump generation counter so any in-flight scoring callback from the
+  // previous generation knows to discard its result.
+  const myGeneration = ++skeletonGeneration;
   setLoading('gen-btn', true);
 
   try {
-    candidates = await planSkeletonCandidates(trip.start, finish, trip.isLoop, trip.targetDayCount, trip.targetKmPerDay);
+    candidates = await planSkeletonCandidates(trip.start, finish, trip.isLoop, trip.targetDayCount, trip.targetKmPerDay, rerollSeed);
 
     // Fetch elevation for the first candidate asynchronously (non-blocking)
     fetchElevationStats(candidates[0].skeleton.coordinates).then(elev => {
-      if (elev) {
+      if (elev && skeletonGeneration === myGeneration) {
         document.getElementById('stat-ascent').textContent = `${elev.ascentMetres}m`;
       }
     });
@@ -1129,12 +1610,15 @@ async function generateSkeleton() {
     // Greenery scoring via Overpass (async, re-sorts candidates + updates labels)
     if (candidates.length > 1) {
       const activeSkeleton = candidates[activeCandidateIdx]?.skeleton;
-      scoreAllCandidates(candidates).then(() => {
+      const scoringCandidates = candidates; // capture array reference for this generation
+      scoreAllCandidates(scoringCandidates).then(() => {
+        // Discard stale result if the user hit Regenerate while we were scoring
+        if (skeletonGeneration !== myGeneration) return;
         // After sort, find the active candidate by skeleton identity
-        const newActiveIdx = candidates.findIndex(c => c.skeleton === activeSkeleton);
+        const newActiveIdx = scoringCandidates.findIndex(c => c.skeleton === activeSkeleton);
         if (newActiveIdx !== -1) activeCandidateIdx = newActiveIdx;
         // Update trip.skeletonCandidates with scored fractions + new order
-        trip.skeletonCandidates = candidates.map(c => ({
+        trip.skeletonCandidates = scoringCandidates.map(c => ({
           skeleton: c.skeleton,
           dayEnds: c.skeleton.dayEnds.map(de => c.skeleton.coordinates[de.index]),
           bearingDeg: c.bearing,
@@ -1936,10 +2420,14 @@ async function overpassQuery(body) {
 // ── Greenery scoring (Overpass parks bbox) ────────────────────────────────────
 // Mirrors tripSkeletonService.ts scoreGreenery() and findNearbyParksWithStatus()
 const GREENERY_HIT_DEG = 80 / 111_000; // ~80 m in degrees
+const SNAP_MARGIN_DEG   = 1000 / 111_000; // ~1 km in degrees
 
 async function fetchParksForBbox(minLat, minLon, maxLat, maxLon) {
   const bbox = `${minLat},${minLon},${maxLat},${maxLon}`;
-  const q = `[out:json][timeout:15];
+  // Include both ways (small patches) and relations (national parks, protected areas).
+  // National parks like the Peak District are OSM relations — querying only ways
+  // returned 0 hits and scored them 0% nature despite the route being deep inside.
+  const q = `[out:json][timeout:20];
 (
   way["leisure"="park"](${bbox});
   way["leisure"="nature_reserve"](${bbox});
@@ -1948,11 +2436,184 @@ async function fetchParksForBbox(minLat, minLon, maxLat, maxLon) {
   way["landuse"="forest"](${bbox});
   way["natural"="wood"](${bbox});
   way["natural"="scrub"](${bbox});
+  way["natural"="beach"](${bbox});
+  way["natural"="heath"](${bbox});
+  way["natural"="moor"](${bbox});
+  way["natural"="fell"](${bbox});
+  way["natural"="grassland"](${bbox});
+  relation["boundary"="national_park"](${bbox});
+  relation["boundary"="protected_area"]["protect_class"~"^(2|5|6)$"](${bbox});
+  relation["leisure"="nature_reserve"](${bbox});
 );
 out bb;`;
   const data = await overpassQuery(q);
   if (!data) return [];
-  return (data.elements || []).filter(e => e.bounds).map(e => e.bounds);
+  // Return enriched objects with bbox + centroid for snap calculations.
+  // Relations return bounds just like ways when using "out bb".
+  // id + type are kept so we can later upgrade selected parks to true geometry
+  // via fetchParkGeometryByIdsWeb (clips the cost-discount grid to the real
+  // outline instead of a bbox containing towns).
+  return (data.elements || []).filter(e => e.bounds).map(e => ({
+    ...e.bounds,
+    centreLat: (e.bounds.minlat + e.bounds.maxlat) / 2,
+    centreLon: (e.bounds.minlon + e.bounds.maxlon) / 2,
+    id: e.id,
+    osmType: e.type, // 'way' | 'relation'
+    boundary: null,  // populated by fetchParkGeometryByIdsWeb when upgraded
+    boundaryIsRealGeometry: false,
+  }));
+}
+
+// Fetch true outer-ring geometry for a small set of selected parks. Mirrors
+// fetchParkGeometryByIds() in routeService.ts. We use this for the few parks
+// we're about to apply a cost-discount grid to — without true geometry the
+// grid is laid over the park's BBOX, which for a national park covers the
+// whole rectangle including towns inside it.
+async function fetchParkGeometryByIdsWeb(parks) {
+  const out = new Map();
+  if (!parks.length) return out;
+  const wayIds = parks.filter(p => p.osmType !== 'relation').map(p => p.id);
+  const relIds = parks.filter(p => p.osmType === 'relation').map(p => p.id);
+  const parts = [];
+  if (wayIds.length) parts.push(`way(id:${wayIds.join(',')});`);
+  if (relIds.length) parts.push(`relation(id:${relIds.join(',')});`);
+  if (!parts.length) return out;
+  const q = `[out:json][timeout:25];(${parts.join('')});out geom;`;
+  try {
+    const data = await overpassQuery(q);
+    if (!data) return out;
+    for (const el of (data.elements || [])) {
+      let ring = [];
+      if (el.type === 'way' && Array.isArray(el.geometry)) {
+        ring = el.geometry
+          .filter(g => typeof g.lat === 'number' && typeof g.lon === 'number')
+          .map(g => ({ latitude: g.lat, longitude: g.lon }));
+      } else if (el.type === 'relation' && Array.isArray(el.members)) {
+        for (const m of el.members) {
+          if (m.type !== 'way' || (m.role !== 'outer' && m.role !== '')) continue;
+          if (!Array.isArray(m.geometry)) continue;
+          for (const g of m.geometry) {
+            if (typeof g.lat === 'number' && typeof g.lon === 'number') {
+              ring.push({ latitude: g.lat, longitude: g.lon });
+            }
+          }
+        }
+      }
+      if (ring.length >= 3) out.set(el.id, ring);
+    }
+    console.log(`[parkGeomWeb] fetched true geometry for ${out.size}/${parks.length} parks`);
+  } catch (e) {
+    console.warn('[parkGeomWeb] failed; falling back to bbox-only weighting:', e);
+  }
+  return out;
+}
+
+// Ray-cast point-in-polygon, mirrors pointInPolygon() in tripSkeletonService.ts.
+function pointInPolygonWeb(pt, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].longitude, yi = ring[i].latitude;
+    const xj = ring[j].longitude, yj = ring[j].latitude;
+    const intersect = ((yi > pt.latitude) !== (yj > pt.latitude)) &&
+      (pt.longitude < ((xj - xi) * (pt.latitude - yi)) / ((yj - yi) || 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Fetch town/city/residential outlines along a corridor. Mirrors
+// findSettlementsAlongCorridor() in routeService.ts. Used to PENALISE routing
+// through settlements via BRouter polylines= entries with weight > 1.
+async function findSettlementsAlongCorridorWeb(bbox) {
+  const bboxStr = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`;
+  const q = `[out:json][timeout:20];(
+    node["place"~"^(city|town)$"](${bboxStr});
+    way["landuse"="residential"](${bboxStr});
+    relation["landuse"="residential"](${bboxStr});
+  );out bb tags center;`;
+  let data;
+  try { data = await overpassQuery(q); } catch { return []; }
+  if (!data) return [];
+  const elements = data.elements || [];
+  const out = [];
+  for (const el of elements) {
+    const tags = el.tags || {};
+    if (el.type === 'node' && tags.place) {
+      const kind = tags.place === 'city' ? 'city' : 'town';
+      const radiusM = kind === 'city' ? 2500 : 1200;
+      if (typeof el.lat !== 'number' || typeof el.lon !== 'number') continue;
+      out.push({
+        id: el.id, kind, name: tags.name || kind,
+        centre: { latitude: el.lat, longitude: el.lon },
+        radiusM,
+      });
+      continue;
+    }
+    const b = el.bounds;
+    const c = el.center;
+    if (!b || !c) continue;
+    const cosLat = Math.cos(((b.minlat + b.maxlat) / 2 * Math.PI) / 180);
+    const widthM  = (b.maxlon - b.minlon) * 111320 * cosLat;
+    const heightM = (b.maxlat - b.minlat) * 111320;
+    const areaKm2 = (widthM * heightM) / 1_000_000;
+    if (areaKm2 < 0.5 || areaKm2 > 500) continue;
+    const radiusM = Math.min(3500, Math.max(400, Math.max(widthM, heightM) / 2));
+    out.push({
+      id: el.id, kind: 'residential', name: tags.name || 'residential area',
+      centre: { latitude: c.lat, longitude: c.lon },
+      radiusM,
+    });
+  }
+  // Dedup: residential areas inside a city/town radius are dropped.
+  const cityCentres = out.filter(s => s.kind === 'city' || s.kind === 'town');
+  const filtered = out.filter(s => {
+    if (s.kind === 'city' || s.kind === 'town') return true;
+    return !cityCentres.some(c => {
+      const dLat = (c.centre.latitude - s.centre.latitude) * 111320;
+      const cosLat = Math.cos((c.centre.latitude * Math.PI) / 180);
+      const dLon = (c.centre.longitude - s.centre.longitude) * 111320 * cosLat;
+      const d = Math.sqrt(dLat * dLat + dLon * dLon);
+      return d < c.radiusM;
+    });
+  });
+  console.log(`[settlementsWeb] ${elements.length} raw → ${out.length} valid → ${filtered.length} after dedup`);
+  return filtered;
+}
+
+// Convert settlements to BRouter weighted polylines with penalty weight.
+function settlementsToPenaltyPolylinesWeb(settlements) {
+  const out = [];
+  const PENALTY_WEIGHT = 4;
+  for (const s of settlements) {
+    const ring = [];
+    const cosLat = Math.cos((s.centre.latitude * Math.PI) / 180);
+    const rLat = s.radiusM / 111320;
+    const rLon = s.radiusM / (111320 * Math.max(0.1, cosLat));
+    for (let i = 0; i < 8; i++) {
+      const theta = (i * Math.PI * 2) / 8;
+      ring.push({
+        latitude:  s.centre.latitude  + Math.cos(theta) * rLat,
+        longitude: s.centre.longitude + Math.sin(theta) * rLon,
+      });
+    }
+    ring.push(ring[0]);
+    out.push({ coords: ring, weight: PENALTY_WEIGHT });
+    out.push({
+      coords: [
+        { latitude: s.centre.latitude - rLat, longitude: s.centre.longitude },
+        { latitude: s.centre.latitude + rLat, longitude: s.centre.longitude },
+      ],
+      weight: PENALTY_WEIGHT,
+    });
+    out.push({
+      coords: [
+        { latitude: s.centre.latitude, longitude: s.centre.longitude - rLon },
+        { latitude: s.centre.latitude, longitude: s.centre.longitude + rLon },
+      ],
+      weight: PENALTY_WEIGHT,
+    });
+  }
+  return out;
 }
 
 function scoreGreenery(coords, parks) {
@@ -1972,6 +2633,55 @@ function scoreGreenery(coords, parks) {
   return hits / coords.length;
 }
 
+// Snap equal-distance day-end indices toward nearby greenery. Mirrors
+// tripSkeletonService.ts snapDayEndsToGreenery(). Works with the
+// bbox-only park format returned by fetchParksForBbox (which now includes
+// centreLat/centreLon).
+function snapDayEndsToGreenery(baseIndices, coords, totalMetres, dayCount, parks) {
+  if (!parks.length || coords.length < 3) return baseIndices;
+  const stepM = totalMetres / dayCount;
+  const windowM = stepM * 0.20;
+
+  // Build cumulative distance array
+  const cd = [0];
+  for (let i = 1; i < coords.length; i++) {
+    cd.push(cd[i-1] + haversine(coords[i-1], coords[i]));
+  }
+  const tot = cd[cd.length - 1];
+
+  function distToNearestPark(c) {
+    let best = Infinity;
+    for (const p of parks) {
+      if (c.latitude  >= p.minlat - SNAP_MARGIN_DEG &&
+          c.latitude  <= p.maxlat + SNAP_MARGIN_DEG &&
+          c.longitude >= p.minlon - SNAP_MARGIN_DEG &&
+          c.longitude <= p.maxlon + SNAP_MARGIN_DEG) {
+        const d = haversine(c, { latitude: p.centreLat, longitude: p.centreLon });
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  return baseIndices.map(baseIdx => {
+    const baseDist = cd[baseIdx];
+    const lo = Math.max(0, baseDist - windowM);
+    const hi = Math.min(tot, baseDist + windowM);
+    let iLo = 0, iHi = coords.length - 1;
+    for (let i = 0; i < coords.length; i++) {
+      if (cd[i] <= lo) iLo = i;
+      if (cd[i] <= hi) iHi = i;
+    }
+    let bestIdx = baseIdx;
+    let bestDist = distToNearestPark(coords[baseIdx]);
+    for (let i = iLo; i <= iHi; i++) {
+      const d = distToNearestPark(coords[i]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return bestIdx;
+  });
+}
+
 async function scoreAllCandidates(cands) {
   // Compute a combined bbox covering all candidates
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
@@ -1988,11 +2698,17 @@ async function scoreAllCandidates(cands) {
   const parks = await fetchParksForBbox(minLat - pad, minLon - pad, maxLat + pad, maxLon + pad);
 
   // Score each candidate (subsample to 200 pts max for speed)
+  // Also snap day-ends toward greenery using the fetched parks.
   for (const c of cands) {
     const coords = c.skeleton.coordinates;
     const step = Math.max(1, Math.floor(coords.length / 200));
     const sampled = coords.filter((_, i) => i % step === 0);
     c.greeneryFraction = scoreGreenery(sampled, parks);
+
+    // Snap day-end cuts toward greenery
+    const rawIdx = c.skeleton.dayEnds.map(d => d.index);
+    const snapped = snapDayEndsToGreenery(rawIdx, coords, c.skeleton.distanceMetres, c.skeleton.dayEnds.length + 1, parks);
+    c.skeleton.dayEnds = snapped.map(idx => ({ kind: 'cut', index: idx }));
   }
 
   // Sort descending by greeneryFraction
@@ -2001,8 +2717,8 @@ async function scoreAllCandidates(cands) {
   // Relabel if spread is sufficient (>5% gap between best and worst)
   const gap = (cands[0]?.greeneryFraction ?? 0) - (cands[cands.length - 1]?.greeneryFraction ?? 0);
   if (cands.length > 1 && gap > 0.05) {
-    cands[0].label = `${bearingLabel(cands[0].bearing)} · Greener`;
-    cands[cands.length - 1].label = `${bearingLabel(cands[cands.length - 1].bearing)} · Mostly roads`;
+    cands[0].label = `Greenest · ${bearingLabel(cands[0].bearing)}`;
+    cands[cands.length - 1].label = `Less nature · ${bearingLabel(cands[cands.length - 1].bearing)}`;
   }
 
   return cands;
@@ -2012,6 +2728,12 @@ async function scoreAllCandidates(cands) {
 const STEP_IDS = ['p1','p2','p25','p3','p4'];
 
 function goToStep(n) {
+  // Clean up sleep-step map layers when leaving
+  if (currentStep === 2.5 && n !== 2.5) {
+    closeSleepConfirm(); // dismiss any open popup before navigating away
+    removeGreenOverlays();
+    removeSleepSegmentHighlights();
+  }
   currentStep = n;
   STEP_IDS.forEach((id, i) => {
     const el = document.getElementById(id);
@@ -2048,29 +2770,168 @@ function goBack() { goToStep(1); }
 // ── Sleep / accommodation step (2.5) ─────────────────────────────────────────
 // One "night" per interior day-end. User picks from nearby Overpass camp POIs
 // or pins manually. Night N = the end of Day N (0-indexed).
+//
+// Greenery context: for each night, we also fetch nearby parks/forests/moorland/
+// coast so we can (1) score/sort candidates by proximity to natural areas,
+// (2) show a greenery context banner, and (3) add a soft green overlay on the map.
 
 let sleepPicks = {}; // dayIdx → { id, coord, name, emoji } | 'skip'
-let sleepPois  = {}; // dayIdx → [{id, coord, name, emoji, distM}]
+let sleepPois  = {}; // dayIdx → [{id, coord, name, emoji, distM, greenTag?}]
+let sleepParks = {}; // dayIdx → [{centre, kind, name, boundary}]
+
+// Add a highlighted skeleton segment for each night's incoming leg so the
+// user can see how far each accommodation option deviates from the route.
+// Each night gets its own MapLibre source+layer (unique id per night index).
+// Mirrors the app's `currentSegment` purple line in trip-sleep/[id].tsx.
+const sleepSegmentIds = []; // track source/layer ids for cleanup
+
+function addSleepSegmentHighlight(nightIdx) {
+  const coords = trip.skeleton?.coordinates;
+  const dayEnds = trip.skeleton?.dayEnds;
+  if (!coords || !dayEnds || nightIdx >= dayEnds.length) return;
+  // Guard: map style may not be loaded yet (e.g. renderSleepStep called
+  // immediately after the map initialises). Defer until 'styledata' fires.
+  if (!map.isStyleLoaded()) {
+    map.once('styledata', () => addSleepSegmentHighlight(nightIdx));
+    return;
+  }
+
+  // Resolve a dayEnd to its nearest vertex index in the polyline.
+  function dayEndIdx(de) {
+    if (de.kind !== 'pinned') return de.index;
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < coords.length; i++) {
+      const dx = coords[i].longitude - de.coord.longitude;
+      const dy = coords[i].latitude  - de.coord.latitude;
+      const d  = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+  }
+
+  const startIdx = nightIdx === 0 ? 0 : dayEndIdx(dayEnds[nightIdx - 1]);
+  const endIdx   = dayEndIdx(dayEnds[nightIdx]);
+  if (endIdx <= startIdx) return;
+  const seg = coords.slice(startIdx, endIdx + 1);
+
+  const SRC = `sleep-seg-hi-${nightIdx}`;
+  const LYR = `sleep-seg-hi-line-${nightIdx}`;
+  if (map.getSource(SRC)) return; // already added
+  map.addSource(SRC, {
+    type: 'geojson',
+    data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: seg.map(c => [c.longitude, c.latitude]) } },
+  });
+  map.addLayer({
+    id: LYR, type: 'line', source: SRC,
+    paint: { 'line-color': '#7c3aed', 'line-width': 4, 'line-opacity': 0.85 },
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+  });
+  sleepSegmentIds.push({ SRC, LYR });
+}
+
+function removeSleepSegmentHighlights() {
+  for (const { SRC, LYR } of sleepSegmentIds) {
+    if (map.getLayer(LYR)) map.removeLayer(LYR);
+    if (map.getSource(SRC)) map.removeSource(SRC);
+  }
+  sleepSegmentIds.length = 0;
+}
 
 const ACCOM_SEARCH_RADIUS = 4000; // metres
+const GREENERY_BADGE_M = 600;     // within 600m = show greenery badge
 
 const OVERPASS_CAMP_TAGS = [
   ['tourism','camp_site'],
+  ['tourism','caravan_site'],
   ['tourism','hostel'],
   ['tourism','alpine_hut'],
   ['tourism','wilderness_hut'],
   ['tourism','guest_house'],
   ['tourism','hotel'],
+  ['tourism','chalet'],
+  ['tourism','motel'],
+  ['amenity','shelter'],   // open-sided shelters / lean-tos / basic bothies
 ];
 
 const ACCOM_EMOJI = {
   camp_site: '⛺',
+  caravan_site: '🚐',
   hostel: '🛏',
   alpine_hut: '🏔',
   wilderness_hut: '🪵',
   guest_house: '🏡',
   hotel: '🏨',
+  chalet: '🏡',
+  motel: '🏨',
+  shelter: '🛖',
 };
+
+const GREENERY_TAG_DISPLAY = {
+  forest:        { emoji: '🌲', label: 'Forest' },
+  moorland:      { emoji: '🌿', label: 'Moorland' },
+  national_park: { emoji: '🏔', label: 'National Park' },
+  coastal:       { emoji: '🏖', label: 'Coastal' },
+  park:          { emoji: '🌳', label: 'Greenery' },
+};
+
+// Fetch nearby greenery polygons (parks, forests, moorland, beaches) for
+// scoring and map overlay. Returns a list of {centre, kind, name, boundary}.
+async function fetchSleepGreenery(coord, radiusM) {
+  const lat = coord.latitude, lon = coord.longitude;
+  // Use `out bb` for all elements — returns bbox only, never times out even
+  // for large national park relations (400+ member ways). We build a
+  // synthetic 4-corner boundary from el.bounds, which is sufficient for:
+  //   • the green overlay fill on the map
+  //   • the "near national park" context banner
+  //   • proximity scoring of accommodation candidates
+  const q = `[out:json][timeout:12];
+(
+  way["leisure"~"^(park|garden|nature_reserve|common)$"](around:${radiusM},${lat},${lon});
+  relation["leisure"~"^(park|garden|nature_reserve|common)$"](around:${radiusM},${lat},${lon});
+  way["landuse"~"^(forest|meadow|grass)$"](around:${radiusM},${lat},${lon});
+  relation["landuse"~"^(forest|meadow|grass)$"](around:${radiusM},${lat},${lon});
+  way["natural"~"^(wood|heath|moor|fell|grassland|beach|sand)$"](around:${radiusM},${lat},${lon});
+  relation["natural"~"^(wood|heath|moor|fell|grassland|beach|sand)$"](around:${radiusM},${lat},${lon});
+  way["boundary"="national_park"](around:${radiusM},${lat},${lon});
+  relation["boundary"="national_park"](around:${radiusM},${lat},${lon});
+);
+out bb tags;`;
+  const data = await overpassQuery(q);
+  if (!data) return [];
+  const parks = [];
+  for (const el of (data.elements || [])) {
+    // `out bb` populates el.bounds = { minlat, maxlat, minlon, maxlon }.
+    const b = el.bounds;
+    if (!b || b.minlat == null) continue;
+    const boundary = [
+      { latitude: b.minlat, longitude: b.minlon },
+      { latitude: b.minlat, longitude: b.maxlon },
+      { latitude: b.maxlat, longitude: b.maxlon },
+      { latitude: b.maxlat, longitude: b.minlon },
+    ];
+    const centreLat = (b.minlat + b.maxlat) / 2;
+    const centreLon = (b.minlon + b.maxlon) / 2;
+    const t = el.tags || {};
+    let kind = 'park';
+    if (t.boundary === 'national_park') kind = 'national_park';
+    else if (t.natural === 'beach' || t.natural === 'sand') kind = 'coastal';
+    else if (t.landuse === 'forest' || t.natural === 'wood') kind = 'forest';
+    else if (t.natural === 'moor' || t.natural === 'fell' || t.natural === 'heath' || t.natural === 'grassland') kind = 'moorland';
+    parks.push({ centre: { latitude: centreLat, longitude: centreLon }, kind, name: t.name || t['name:en'] || null, boundary });
+  }
+  return parks;
+}
+
+// Return the greenery tag for the nearest park within GREENERY_BADGE_M, or null.
+function nearestGreenTagForCoord(coord, parks) {
+  let best = null;
+  for (const p of parks) {
+    const d = haversine(coord, p.centre);
+    if (d > GREENERY_BADGE_M) continue;
+    if (!best || d < best.d) best = { d, tag: p.kind };
+  }
+  return best ? best.tag : null;
+}
 
 async function fetchAccomPois(coord, radiusM) {
   const lat = coord.latitude, lon = coord.longitude;
@@ -2087,13 +2948,52 @@ out center 20;`;
   const data = await overpassQuery(q);
   if (!data) return [];
   return (data.elements || []).map(e => {
-    const kind = e.tags?.tourism || 'camp_site';
+    const kind = e.tags?.tourism || e.tags?.amenity || 'camp_site';
     const name = e.tags?.name || e.tags?.['name:en'] || kind.replace(/_/g, ' ');
     const eLat = e.lat ?? e.center?.lat, eLon = e.lon ?? e.center?.lon;
     if (!eLat || !eLon) return null;
     const distM = Math.round(haversine({ latitude: lat, longitude: lon }, { latitude: eLat, longitude: eLon }));
     return { id: String(e.id), coord: { latitude: eLat, longitude: eLon }, name, emoji: ACCOM_EMOJI[kind] || '🏨', distM };
-  }).filter(Boolean).sort((a, b) => a.distM - b.distM).slice(0, 6);
+  }).filter(Boolean).sort((a, b) => a.distM - b.distM).slice(0, 12);
+}
+
+// Greenery polygon layers by night index. Key = `green-overlay-${i}`.
+const greenOverlayIds = {};
+
+function addGreenOverlay(i, parks) {
+  const sourceId = `green-overlay-${i}`;
+  const layerId  = `green-overlay-fill-${i}`;
+  if (!parks || parks.length === 0) return;
+  const features = parks
+    .filter(p => p.boundary.length >= 3)
+    .map(p => ({
+      type: 'Feature',
+      properties: { kind: p.kind },
+      geometry: { type: 'Polygon', coordinates: [p.boundary.map(c => [c.longitude, c.latitude])] }
+    }));
+  if (features.length === 0) return;
+  if (map.getSource(sourceId)) {
+    map.getSource(sourceId).setData({ type: 'FeatureCollection', features });
+  } else {
+    map.addSource(sourceId, { type: 'geojson', data: { type: 'FeatureCollection', features } });
+    map.addLayer({
+      id: layerId, type: 'fill', source: sourceId,
+      paint: {
+        'fill-color': ['match', ['get', 'kind'],
+          'coastal', '#f59e0b', 'forest', '#16a34a', '#22c55e'],
+        'fill-opacity': 0.14, 'fill-outline-color': 'rgba(34,197,94,0.4)',
+      }
+    });
+    greenOverlayIds[i] = { sourceId, layerId };
+  }
+}
+
+function removeGreenOverlays() {
+  for (const { sourceId, layerId } of Object.values(greenOverlayIds)) {
+    if (map.getLayer(layerId)) map.removeLayer(layerId);
+    if (map.getSource(sourceId)) map.removeSource(sourceId);
+  }
+  Object.keys(greenOverlayIds).forEach(k => delete greenOverlayIds[k]);
 }
 
 function renderSleepStep() {
@@ -2112,6 +3012,7 @@ function renderSleepStep() {
         <div class="sleep-dot" style="background:${color}"></div>
         <div class="sleep-night-label">Night ${i + 1} — end of Day ${i + 1}</div>
       </div>
+      <div id="sleep-greenery-${i}"></div>
       <div id="sleep-cards-${i}" class="accom-loading"><span class="spinner"></span> Searching nearby…</div>
     </div>`;
   }
@@ -2121,20 +3022,80 @@ function renderSleepStep() {
   </div>`;
   document.getElementById('sleep-body').innerHTML = html;
 
-  // Fire parallel POI fetches per night
+  // Draw highlighted skeleton segments — one per night, purple so they
+  // stand out from the green park shading. Shows how far each night's
+  // accommodation options are from the planned route.
+  removeSleepSegmentHighlights(); // clear any from a prior visit to this step
+  for (let i = 0; i < nights; i++) {
+    addSleepSegmentHighlight(i);
+  }
+
+  // Fire parallel POI + greenery fetches per night
   for (let i = 0; i < nights; i++) {
     const dayEnd = trip.skeleton.dayEnds[i];
     const coord = dayEnd.kind === 'pinned' ? dayEnd.coord : trip.skeleton.coordinates[dayEnd.index];
-    fetchAccomPois(coord, ACCOM_SEARCH_RADIUS).then(pois => {
+    // Fetch accommodation + greenery in parallel
+    Promise.all([
+      fetchAccomPois(coord, ACCOM_SEARCH_RADIUS),
+      fetchSleepGreenery(coord, ACCOM_SEARCH_RADIUS + 2000),
+    ]).then(([pois, parks]) => {
       sleepPois[i] = pois;
-      renderSleepNight(i, coord);
+      sleepParks[i] = parks;
+      // Score each poi by greenery proximity — sorts near-nature options first
+      for (const p of pois) {
+        p.greenTag = nearestGreenTagForCoord(p.coord, parks);
+      }
+      pois.sort((a, b) => {
+        const ag = a.greenTag !== null && a.greenTag !== undefined ? 1 : 0;
+        const bg = b.greenTag !== null && b.greenTag !== undefined ? 1 : 0;
+        if (ag !== bg) return bg - ag; // green first
+        return a.distM - b.distM;
+      });
+      renderSleepNight(i, coord, parks);
       placeAllAccomMarkers(i);
+      addGreenOverlay(i, parks);
     });
   }
 }
 
+// Popup confirmation state — mirrors the app's two-tap "confirm strip" pattern.
+// Clicking a map marker shows this popup; the user must press "Sleep here" to commit.
+let sleepConfirmPopup = null;
+
+function showSleepConfirm(dayIdx, poiIdx) {
+  if (sleepConfirmPopup) { sleepConfirmPopup.remove(); sleepConfirmPopup = null; }
+  const poi = (sleepPois[dayIdx] || [])[poiIdx];
+  if (!poi) return;
+  const distStr = poi.distM < 1000 ? `${Math.round(poi.distM)}m from route` : `${(poi.distM/1000).toFixed(1)}km from route`;
+  const popup = new maplibregl.Popup({ closeButton: false, maxWidth: '240px', offset: 28 })
+    .setLngLat([poi.coord.longitude, poi.coord.latitude])
+    .setHTML(`
+      <div style="font-family:-apple-system,sans-serif;padding:2px">
+        <div style="font-size:20px;text-align:center;margin-bottom:4px">${poi.emoji || '🏨'}</div>
+        <div style="font-weight:700;font-size:13px;color:#f5f5f5;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">${poi.name}</div>
+        <div style="font-size:11px;color:#a3a3a3;margin-bottom:8px">${poi.kind || ''} · ${distStr}</div>
+        <div style="display:flex;gap:6px">
+          <button onclick="closeSleepConfirm()" style="flex:1;padding:6px 0;background:#1e1e1e;border:1px solid #2a2a2a;border-radius:6px;color:#a3a3a3;font-size:12px;cursor:pointer">✕ Cancel</button>
+          <button onclick="confirmSleepPick(${dayIdx},${poiIdx})" style="flex:2;padding:6px 0;background:#a3e635;border:none;border-radius:6px;color:#0a0a0a;font-size:12px;font-weight:700;cursor:pointer">Sleep here</button>
+        </div>
+      </div>
+    `)
+    .addTo(map);
+  sleepConfirmPopup = popup;
+}
+
+function closeSleepConfirm() {
+  if (sleepConfirmPopup) { sleepConfirmPopup.remove(); sleepConfirmPopup = null; }
+}
+
+function confirmSleepPick(dayIdx, poiIdx) {
+  closeSleepConfirm();
+  pickSleepByIdx(dayIdx, poiIdx);
+}
+
 // Place faint preview markers for every accommodation option for night i.
-// Clicking a map marker picks that accommodation — same as tapping the card.
+// Clicking a map marker shows a confirmation popup before committing —
+// mirrors the app's tap→strip→"Sleep here" two-step flow.
 function placeAllAccomMarkers(i) {
   // Remove old previews for this night
   (accomAllMarkers[i] || []).forEach(m => m.remove());
@@ -2148,42 +3109,79 @@ function placeAllAccomMarkers(i) {
     el.style.cssText = 'font-size:18px;cursor:pointer;opacity:0.65;line-height:1;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.4))';
     el.textContent = p.emoji || '🏨';
     el.title = p.name;
-    // Clicking the map marker is the same as tapping the list card.
-    el.addEventListener('click', () => pickSleepByIdx(i, j));
+    // Show confirmation popup first — don't commit on single click.
+    el.addEventListener('click', (e) => { e.stopPropagation(); showSleepConfirm(i, j); });
     const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([p.coord.longitude, p.coord.latitude]).addTo(map);
     accomAllMarkers[i].push(m);
   });
 }
 
-function renderSleepNight(i, coord) {
+function renderSleepNight(i, coord, parks) {
   const el = document.getElementById(`sleep-cards-${i}`);
   if (!el) return;
   const pois = sleepPois[i] || [];
+  const parksLocal = parks || sleepParks[i] || [];
   const pick = sleepPicks[i];
+
+  // Greenery context banner
+  const greenEl = document.getElementById(`sleep-greenery-${i}`);
+  if (greenEl) {
+    const tag = nearestGreenTagForCoord(coord, parksLocal);
+    if (tag) {
+      const d = GREENERY_TAG_DISPLAY[tag] || GREENERY_TAG_DISPLAY.park;
+      const nearest = parksLocal
+        .filter(p => p.kind === tag || (tag === 'forest' && (p.kind === 'forest' || p.kind === 'wood')))
+        .sort((a, b) => haversine(coord, a.centre) - haversine(coord, b.centre))[0];
+      const msg = nearest?.name
+        ? `This night is near ${nearest.name} — natural stop.`
+        : `Natural area nearby — good wild camping territory.`;
+      greenEl.innerHTML = `<div style="background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.4);border-radius:6px;padding:8px 10px;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:#16a34a;letter-spacing:1px">${d.emoji} ${d.label.toUpperCase()}</div>
+        <div style="font-size:12px;color:#4b5563;margin-top:2px">${msg}</div>
+      </div>`;
+    } else {
+      greenEl.innerHTML = '';
+    }
+  }
+
   let html = '';
   if (pois.length === 0) {
     html += `<div class="accom-loading">No accommodation found nearby</div>`;
   } else {
-    html += pois.map((p, j) =>
-      `<div class="accom-card${pick && pick.id === p.id ? ' picked' : ''}" onclick="pickSleepByIdx(${i}, ${j})">
+    html += pois.map((p, j) => {
+      const gd = p.greenTag ? (GREENERY_TAG_DISPLAY[p.greenTag] || null) : null;
+      const badge = gd
+        ? `<span style="font-size:10px;font-weight:700;color:#16a34a;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);border-radius:6px;padding:1px 5px;align-self:center">${gd.emoji} ${gd.label}</span>`
+        : '';
+      return `<div class="accom-card${pick && pick.id === p.id ? ' picked' : ''}" onclick="pickSleepByIdx(${i}, ${j})">
         <div class="accom-emoji">${p.emoji}</div>
         <div style="flex:1">
           <div class="accom-name">${p.name}</div>
           <div class="accom-dist">${p.distM < 1000 ? p.distM + 'm away' : (p.distM/1000).toFixed(1) + 'km away'}</div>
         </div>
+        ${badge}
         ${pick && pick.id === p.id ? '<div style="color:var(--accent);font-size:16px;align-self:center">✓</div>' : ''}
-      </div>`
-    ).join('');
+      </div>`;
+    }).join('');
   }
-  // Wild-camp / skip option
+  // Wild-camp + explicit skip option
   html += `<div class="accom-card${pick === 'skip' ? ' picked' : ''}" onclick="pickSleep(${i}, 'skip')">
-    <div class="accom-emoji">🌙</div>
+    <div class="accom-emoji">⛺</div>
     <div style="flex:1">
-      <div class="accom-name">Wild camp / no stop</div>
-      <div class="accom-dist">Mark the end-of-day point only</div>
+      <div class="accom-name">Wild camp here</div>
+      <div class="accom-dist">Mark the day-end point; no booked accommodation</div>
     </div>
     ${pick === 'skip' ? '<div style="color:var(--accent);font-size:16px;align-self:center">✓</div>' : ''}
+  </div>
+  <button onclick="pickSleep(${i}, 'skip')" style="width:100%;margin-top:6px;padding:8px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:12px;cursor:pointer;text-align:center">
+    Skip Night ${i + 1} — leave as free cut
+  </button>
+  <div style="background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.35);border-radius:6px;padding:8px 10px;margin-top:4px">
+    <div style="font-size:10px;font-weight:700;color:#b45309;letter-spacing:1px">⚠️ KNOW THE LAW</div>
+    <div style="font-size:11px;color:#78716c;margin-top:3px;line-height:1.4">
+      Wild camping in England &amp; Wales requires landowner permission. Scotland's Outdoor Access Code permits it responsibly in most places. Dartmoor allows it by-law. Always verify before pitching — Amble shows possible stopping points only.
+    </div>
   </div>`;
   el.innerHTML = html;
   el.className = '';
@@ -2240,14 +3238,24 @@ function pickSleep(dayIdx, poi) {
     map.panTo([poi.coord.longitude, poi.coord.latitude], { duration: 600 });
   }
 
-  renderSleepNight(dayIdx, coord);
+  renderSleepNight(dayIdx, coord, sleepParks[dayIdx] || []);
 }
 
 // ── Per-day route picker (Step 3) ─────────────────────────────────────────────
-const FLAVOUR_COLORS = { direct: '#3b82f6', paths: '#a3e635', scenic: '#a855f7' };
-const FLAVOUR_LABELS = { direct: 'Direct', paths: 'Paths', scenic: 'Scenic' };
-const FLAVOUR_ICONS  = { direct: '→', paths: '🌿', scenic: '〰' };
-const DETOUR_FRACTION = 0.25;
+const FLAVOUR_COLORS = {
+  direct: '#3b82f6', // blue   — Direct
+  paths:  '#a3e635', // green  — Paths
+  scenic: '#a855f7', // purple — Scenic
+  custom: '#a855f7', // purple — Custom (user waypoints, same colour)
+};
+const FLAVOUR_LABELS = {
+  direct: 'Direct', paths: 'Paths', scenic: 'Scenic', custom: 'Custom',
+};
+const FLAVOUR_ICONS = {
+  direct: '🧭', paths: '🌿', scenic: '🌲', custom: '📍',
+};
+const ALL_FLAVOURS = ['direct', 'paths', 'scenic', 'custom'];
+const DETOUR_FRACTION_SCENIC = 0.35;
 const WALK_SPEED_KMH = 5;
 
 let currentDayIdx = 0;
@@ -2390,9 +3398,23 @@ function renderDayPickerBody(alts, dayIdx) {
   const n = trip.targetDayCount;
   let html = '';
 
-  // Alt cards
-  for (const [flavour, alt] of Object.entries(alts)) {
+  // Alt cards — rendered in a fixed flavour order so they don't jump around.
+  // 'custom' only appears when waypoints have been placed.
+  for (const flavour of ALL_FLAVOURS) {
+    const alt = alts[flavour];
     if (!alt) continue;
+    // Custom card: show a "planning…" placeholder if it hasn't been generated
+    // yet (waypoints just placed, replan in flight).
+    if (flavour === 'custom' && alt._planning) {
+      html += `<div class="alt-card" id="altcard-custom" style="--alt-color:${FLAVOUR_COLORS.custom};opacity:0.6">
+        <div class="alt-header">
+          <div class="alt-dot" style="background:${FLAVOUR_COLORS.custom}"></div>
+          <div class="alt-label">📍 Custom</div>
+          <div class="alt-feel-badge" style="margin-left:auto">Planning…</div>
+        </div>
+      </div>`;
+      continue;
+    }
     const selected = flavour === pickedFlavour;
     const color = FLAVOUR_COLORS[flavour];
     const feel = alt.feel || '';
@@ -2507,12 +3529,13 @@ function renderDayPickerBody(alts, dayIdx) {
   document.getElementById('day-picker-body').innerHTML = html;
 }
 
-// ── 3-flavour route generation ────────────────────────────────────────────────
+// ── Multi-flavour route generation ───────────────────────────────────────────
 // BRouter profiles available on brouter.de:
-//   hiking-mountain — mountain hiking (default, general purpose)
+//   hiking-mountain — mountain hiking (default, good trail balance)
 //   trekking        — long-distance trekking, strongly prefers footways/tracks
-//   safety          — safest / most road-like
+//   safety          — safest / most road-like (bailout option)
 
+// Fetch elevation for a single coordinate. Used to assign Ridgeline (uphill
 // Sample N evenly-spaced waypoints from a coordinate array (including endpoints).
 // Used to anchor BRouter routes along the skeleton so it can't shortcut across
 // a multi-km day segment.
@@ -2526,107 +3549,229 @@ function sampleSkeletonWaypoints(coords, n) {
   return out;
 }
 
+// Fetch greenery (parks/forests/moorland/beaches) near a day segment
+// midpoint and return the single best park centroid to use as a via.
+// Mirrors tripDayRouter.ts scenic waypoint logic.
+async function fetchScenicParkVia(start, end) {
+  const segMid = {
+    latitude:  (start.latitude  + end.latitude)  / 2,
+    longitude: (start.longitude + end.longitude) / 2,
+  };
+  const directLen = haversine(start, end);
+  const searchRadius = Math.min(8000, Math.max(1500, directLen * 0.5));
+  const lat = segMid.latitude, lon = segMid.longitude;
+  const q = `[out:json][timeout:10];
+(
+  way["leisure"~"^(park|nature_reserve|common)$"](around:${searchRadius},${lat},${lon});
+  relation["leisure"~"^(park|nature_reserve|common)$"](around:${searchRadius},${lat},${lon});
+  way["landuse"~"^(forest|meadow)$"](around:${searchRadius},${lat},${lon});
+  relation["landuse"~"^(forest|meadow)$"](around:${searchRadius},${lat},${lon});
+  way["natural"~"^(wood|heath|moor|grassland|beach)$"](around:${searchRadius},${lat},${lon});
+  relation["natural"~"^(wood|heath|moor|grassland|beach)$"](around:${searchRadius},${lat},${lon});
+  way["boundary"="national_park"](around:${searchRadius},${lat},${lon});
+  relation["boundary"="national_park"](around:${searchRadius},${lat},${lon});
+);
+out bb;`;
+  const data = await overpassQuery(q);
+  if (!data || !data.elements?.length) return null;
+
+  const cosLat = Math.cos(lat * Math.PI / 180);
+  const dxLine = (end.longitude - start.longitude) * cosLat;
+  const dyLine = end.latitude - start.latitude;
+  const lineLen = Math.sqrt(dxLine * dxLine + dyLine * dyLine) || 1;
+
+  const scored = data.elements
+    .filter(e => e.bounds)
+    .map(e => {
+      const cLat = (e.bounds.minlat + e.bounds.maxlat) / 2;
+      const cLon = (e.bounds.minlon + e.bounds.maxlon) / 2;
+      const areaM2 = (e.bounds.maxlat - e.bounds.minlat) * 111320 *
+                     (e.bounds.maxlon - e.bounds.minlon) * 111320 * cosLat;
+      // Perpendicular distance from centroid to corridor
+      const dxP = (cLon - start.longitude) * cosLat;
+      const dyP = cLat - start.latitude;
+      const perpDeg = Math.abs(dxP * (-dyLine / lineLen) + dyP * (dxLine / lineLen));
+      const perpM = perpDeg * 111320;
+      if (perpM > directLen * 0.6) return null;
+      return { cLat, cLon, score: areaM2 / Math.max(1, perpM) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.length > 0 ? { latitude: scored[0].cLat, longitude: scored[0].cLon } : null;
+}
+
 async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const results = {};
 
-  // Direct: use the skeleton segment itself — it IS the planned path for this day.
-  // Re-routing start→end via BRouter would let BRouter find a shortcut (e.g. a
-  // 5km road for what the skeleton took 20km to walk). The skeleton already came
-  // from BRouter so it's routable; we just use it directly.
-  const skeletonDist = skeletonSegment ? totalDist(skeletonSegment) : 0;
-  let directCoords = skeletonSegment && skeletonSegment.length >= 2 ? skeletonSegment : null;
-  let directPathPct = null;
+  // Skeleton interior anchor points (5 interior, sampled from 7).
+  const skelWpts = skeletonSegment && skeletonSegment.length >= 3
+    ? sampleSkeletonWaypoints(skeletonSegment, Math.min(7, skeletonSegment.length)).slice(1, -1)
+    : [];
+  const aw = [start, ...skelWpts, end];
+  const midIdx = Math.floor(aw.length / 2);
+  const directLen = haversine(start, end);
 
-  // Try to get a richer pathPct for the direct route by asking BRouter with
-  // enough intermediate waypoints to force it along the skeleton. We sample
-  // ~5 waypoints (start + 3 interior + end) — enough to prevent shortcuts
-  // on a typical 10-25km day without hitting BRouter's waypoint limit.
-  if (skeletonSegment && skeletonSegment.length >= 2) {
-    try {
-      const wpts = sampleSkeletonWaypoints(skeletonSegment, Math.min(5, skeletonSegment.length));
-      const r = await routeBRouterFull(wpts, 'hiking-mountain');
-      if (r.coordinates && r.coordinates.length >= 2) {
-        directCoords = r.coordinates;
-        directPathPct = r.pathPct;
-      }
-    } catch (e) { console.warn('[dayAlts] direct BRouter failed, using skeleton segment', e.message); }
-    results.direct = {
-      coordinates: directCoords,
-      distanceMetres: totalDist(directCoords),
-      pathPct: directPathPct,
-      feel: calcFeel(totalDist(directCoords), null),
-      surface: directPathPct != null ? surfaceLabel(directPathPct) : 'mixed',
-    };
-  }
-
-  // Paths: BRouter alternativeidx=1 anchored to the skeleton — typically more
-  // off-road than the primary route. Same skeleton waypoints to stay on track.
-  let pathsCoords = null, pathsPathPct = undefined;
-  if (skeletonSegment && skeletonSegment.length >= 2) {
-    try {
-      const wpts = sampleSkeletonWaypoints(skeletonSegment, Math.min(5, skeletonSegment.length));
-      const lonlats = wpts.map(w => `${w.longitude},${w.latitude}`).join('|');
-      const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=1&format=geojson`;
-      const resp = await fetch(url);
-      if (resp.ok) {
-        const gj = await resp.json();
-        const feat = gj.features?.[0];
-        if (feat) {
-          const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-          const pp = parseBRouterPathDensity(feat.properties?.messages);
-          const distDiff = directCoords ? Math.abs(totalDist(coords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
-          const isDup = directCoords && distDiff < 0.04 && routeSimilarity(directCoords, coords) > 0.88;
-          if (!isDup && coords.length >= 2) {
-            pathsCoords = coords; pathsPathPct = pp;
-            results.paths = {
-              coordinates: pathsCoords,
-              distanceMetres: totalDist(pathsCoords),
-              pathPct: pathsPathPct,
-              feel: calcFeel(totalDist(pathsCoords), null),
-              surface: pathsPathPct != null ? surfaceLabel(pathsPathPct) : 'mixed',
-            };
-          }
+  // ── Day-level park weighting + town penalties ──────────────────────────
+  // Mirrors the per-day logic in tripDayRouter.ts so all three flavours
+  // (direct / paths / scenic) get park-discount polylines + settlement-penalty
+  // polylines. Without this a single day can still cut through a town even
+  // when the skeleton avoided it.
+  const dayMid = { latitude: (start.latitude + end.latitude) / 2, longitude: (start.longitude + end.longitude) / 2 };
+  const dayParkRadiusDeg = Math.min(20_000, Math.max(3_000, directLen * 0.7)) / 111_000;
+  const dayPadDeg = Math.min(0.15, (directLen / 111_000) * 0.5);
+  const dayBbox = {
+    minLat: Math.min(start.latitude,  end.latitude)  - dayPadDeg,
+    maxLat: Math.max(start.latitude,  end.latitude)  + dayPadDeg,
+    minLon: Math.min(start.longitude, end.longitude) - dayPadDeg,
+    maxLon: Math.max(start.longitude, end.longitude) + dayPadDeg,
+  };
+  let dayParks = [];
+  let daySettlements = [];
+  try {
+    [dayParks, daySettlements] = await Promise.all([
+      fetchParksForBbox(
+        dayMid.latitude - dayParkRadiusDeg, dayMid.longitude - dayParkRadiusDeg,
+        dayMid.latitude + dayParkRadiusDeg, dayMid.longitude + dayParkRadiusDeg,
+      ).catch(() => []),
+      findSettlementsAlongCorridorWeb(dayBbox).catch(() => []),
+    ]);
+  } catch { /* non-fatal */ }
+  // Upgrade top 3 corridor-aligned parks to real geometry
+  if (dayParks.length > 0) {
+    const cosDayLat = Math.cos((dayMid.latitude * Math.PI) / 180);
+    const dxLineD = (end.longitude - start.longitude) * cosDayLat;
+    const dyLineD = end.latitude - start.latitude;
+    const lineLenD = Math.sqrt(dxLineD * dxLineD + dyLineD * dyLineD) || 1;
+    const onCorridor = dayParks.filter(p => {
+      const cLat = p.centreLat ?? (p.minlat + p.maxlat) / 2;
+      const cLon = p.centreLon ?? (p.minlon + p.maxlon) / 2;
+      const dxP = (cLon - start.longitude) * cosDayLat;
+      const dyP = cLat - start.latitude;
+      const perpDeg = Math.abs(dxP * (-dyLineD / lineLenD) + dyP * (dxLineD / lineLenD));
+      const perpM = perpDeg * 111_320;
+      return perpM <= Math.max(2_000, directLen * 0.6);
+    });
+    const topThree = onCorridor.sort((a, b) => {
+      const areaA = (a.maxlat - a.minlat) * (a.maxlon - a.minlon);
+      const areaB = (b.maxlat - b.minlat) * (b.maxlon - b.minlon);
+      return areaB - areaA;
+    }).slice(0, 3);
+    if (topThree.length > 0) {
+      const geo = await fetchParkGeometryByIdsWeb(topThree).catch(() => new Map());
+      for (const p of dayParks) {
+        const ring = geo.get(p.id);
+        if (ring && ring.length >= 3) {
+          p.boundary = ring;
+          p.boundaryIsRealGeometry = true;
         }
       }
-    } catch (e) { console.warn('[dayAlts] paths failed', e.message); }
+    }
+  }
+  const dayParkPolylines = parksToPolylines(dayParks, start, [end]);
+  const daySettlementPenalties = settlementsToPenaltyPolylinesWeb(daySettlements);
+  const dayAllPolylines = [...dayParkPolylines, ...daySettlementPenalties];
+  console.log(`[dayAlts ${dayIdx + 1}] polylines: ${dayParkPolylines.length} park, ${daySettlementPenalties.length} settlement (${daySettlements.length} towns)`);
+
+  // Helper: is this set of coords a duplicate of anything already accepted?
+  const isDup = (coords, vs = Object.values(results)) => {
+    if (!coords || coords.length < 2) return true;
+    return vs.some(r => {
+      if (!r.coordinates) return false;
+      const distFrac = Math.abs(totalDist(coords) - r.distanceMetres) / Math.max(1, r.distanceMetres);
+      if (distFrac > 0.08) return false;
+      return routeSimilarity(r.coordinates, coords) > 0.82;
+    });
+  };
+
+  // Build a result object from a BRouter response.
+  const makeAlt = (coords, pathPct) => ({
+    coordinates: coords,
+    distanceMetres: totalDist(coords),
+    pathPct,
+    feel: calcFeel(totalDist(coords), null),
+    surface: pathPct != null ? surfaceLabel(pathPct) : 'mixed',
+  });
+
+  // Scenic via: fetch park centroid in parallel with routing.
+  // If no park found, fall back to a perpendicular detour midpoint.
+  const scenicViaPromise = directLen > 500
+    ? fetchScenicParkVia(start, end).catch(() => null)
+    : Promise.resolve(null);
+
+  // Fire all 3 BRouter requests + scenic via lookup in parallel.
+  // All routes use the trekking profile — most aggressive trail preference.
+  // Paths intentionally omits interior skeleton vias — mirrors the app fix in
+  // tripDayRouter.ts. When the same dense waypoints constrain direct AND paths,
+  // BRouter returns near-identical geometry and the dedup drops paths entirely.
+  // Using only [start, end] gives BRouter room to find a different trail corridor.
+  const pathsLonlats = `${start.longitude.toFixed(6)},${start.latitude.toFixed(6)}|${end.longitude.toFixed(6)},${end.latitude.toFixed(6)}`;
+
+  const [rDirect, rPaths, parkVia] = await Promise.all([
+    // Direct: trekking primary route, skeleton anchored, park discount + town penalty
+    routeBRouterFull(aw, 'trekking', dayAllPolylines).catch(() => null),
+    // Paths: trekking alternativeidx=1, start→end only (no interior vias).
+    // Wider search space → different bridleway/footpath corridor.
+    // Also reuses park discount + town penalty via routeBRouterFull.
+    (async () => {
+      try {
+        return await routeBRouterFull([start, end], 'trekking', dayAllPolylines, 1);
+      } catch { return null; }
+    })(),
+    scenicViaPromise,
+  ]);
+
+  // Build scenic waypoints from park via (or perpendicular fallback)
+  const scenicVia = parkVia ?? (directLen > 500
+    ? perpendicularMidpoint(start, end, DETOUR_FRACTION_SCENIC, 1)
+    : null);
+  const scenicAW = scenicVia
+    ? [...aw.slice(0, midIdx), scenicVia, ...aw.slice(midIdx)]
+    : aw;
+
+  // Scenic: trekking + park/detour via + day-level park discount + town penalty
+  const rScenic = await routeBRouterFull(scenicAW, 'trekking', dayAllPolylines).catch(() => null);
+
+  // ── Direct ────────────────────────────────────────────────────────────────
+  if (rDirect?.coordinates?.length >= 2) {
+    results.direct = makeAlt(rDirect.coordinates, rDirect.pathPct);
+  } else if (skeletonSegment?.length >= 2) {
+    results.direct = makeAlt(skeletonSegment, null);
   }
 
-  // Scenic: route via a perpendicular midpoint offset — forces a geographical
-  // detour relative to the direct skeleton path. We still anchor to the
-  // skeleton midpoint so the total distance stays in the right ballpark.
-  try {
-    const skeletonMid = skeletonSegment && skeletonSegment.length >= 2
-      ? skeletonSegment[Math.floor(skeletonSegment.length / 2)]
-      : { latitude: (start.latitude + end.latitude) / 2, longitude: (start.longitude + end.longitude) / 2 };
-    for (const side of [1, -1]) {
-      // Use start→end as the base segment (not skeletonMid→end): the
-      // perpendicular offset is proportional to that segment length, so
-      // using the full start→end span gives a full-width scenic detour.
-      // Using skeletonMid→end as base halved the detour magnitude.
-      const via = perpendicularMidpoint(start, end, DETOUR_FRACTION, side);
-      const r = await routeBRouterFull([start, via, end], 'hiking-mountain');
-      const scenicCoords = r.coordinates;
-      if (!scenicCoords || scenicCoords.length < 2) continue;
-      // Accept if it's geographically distinct from direct and paths
-      const distDiff = directCoords ? (totalDist(scenicCoords) - totalDist(directCoords)) / totalDist(directCoords) : 1;
-      const dup1 = directCoords && distDiff < 0.06 && routeSimilarity(directCoords, scenicCoords) > 0.85;
-      const dup2 = pathsCoords && routeSimilarity(pathsCoords, scenicCoords) > 0.85;
-      if (dup1 || dup2) continue;
-      results.scenic = {
-        coordinates: scenicCoords,
-        distanceMetres: totalDist(scenicCoords),
-        pathPct: r.pathPct,
-        feel: calcFeel(totalDist(scenicCoords), null),
-        surface: r.pathPct != null ? surfaceLabel(r.pathPct) : 'mixed',
-      };
-      break;
-    }
-  } catch (e) { console.warn('[dayAlts] scenic failed', e.message); }
+  // ── Paths ─────────────────────────────────────────────────────────────────
+  if (rPaths?.coordinates?.length >= 2 && !isDup(rPaths.coordinates)) {
+    results.paths = makeAlt(rPaths.coordinates, rPaths.pathPct);
+  } else {
+    // Fallback: perpendicular nudge with start→end only (same no-via logic).
+    // Routes through routeBRouterFull so day-level park discounts + town
+    // penalties still apply to the nudged variant.
+    try {
+      const nudge = perpendicularMidpoint(start, end, 0.15, 1);
+      const rNudge = await routeBRouterFull([start, nudge, end], 'trekking', dayAllPolylines).catch(() => null);
+      if (rNudge?.coordinates?.length >= 2 && !isDup(rNudge.coordinates)) {
+        results.paths = makeAlt(rNudge.coordinates, rNudge.pathPct);
+      }
+    } catch (e) { console.warn('[dayAlts] paths fallback failed', e.message); }
+  }
 
-  // Must have at least one alt — fall back to raw skeleton slice
+  // ── Scenic ────────────────────────────────────────────────────────────────
+  if (rScenic?.coordinates?.length >= 2 && !isDup(rScenic.coordinates)) {
+    results.scenic = makeAlt(rScenic.coordinates, rScenic.pathPct);
+  } else if (directLen > 500) {
+    // Fallback: other perpendicular side
+    const otherVia = perpendicularMidpoint(start, end, DETOUR_FRACTION_SCENIC, -1);
+    const awOther = [...aw.slice(0, midIdx), otherVia, ...aw.slice(midIdx)];
+    const rOther = await routeBRouterFull(awOther, 'trekking', dayAllPolylines).catch(() => null);
+    if (rOther?.coordinates?.length >= 2 && !isDup(rOther.coordinates)) {
+      results.scenic = makeAlt(rOther.coordinates, rOther.pathPct);
+    }
+  }
+
+  // Must have at least one — fall back to raw skeleton slice
   if (Object.keys(results).length === 0) {
     const seg = skeletonSegment || (() => { const b = getB(); return trip.skeleton.coordinates.slice(b[dayIdx], b[dayIdx + 1] + 1); })();
-    results.direct = { coordinates: seg, distanceMetres: totalDist(seg), pathPct: null, feel: 'easy', surface: 'mixed' };
+    results.direct = makeAlt(seg, null);
   }
 
   // Elevation: fire-and-forget, updates cards when ready
@@ -2636,12 +3781,10 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
       alt.ascentM = elev.ascentMetres;
       alt.feel = calcFeel(alt.distanceMetres, elev.ascentMetres);
       if (currentDayIdx === dayIdx) {
-        // Patch the card in-place without full re-render (avoids losing chip/wp state)
         const card = document.getElementById(`altcard-${flavour}`);
         if (card) {
           const feelBadge = card.querySelector('.alt-feel-badge');
           if (feelBadge) feelBadge.textContent = alt.feel;
-          // Add/update ascent stat
           let ascentCell = card.querySelector('[data-stat="ascent"]');
           if (!ascentCell) {
             ascentCell = document.createElement('div');
@@ -2667,9 +3810,6 @@ function surfaceLabel(pathPct) {
   return 'mostly road';
 }
 
-async function routeBRouterProfile(waypoints, profile) {
-  return routeBRouterFull(waypoints, profile);
-}
 
 function perpendicularMidpoint(start, end, fraction, side) {
   // Midpoint of the segment
@@ -2714,17 +3854,15 @@ function calcFeel(distM, ascentM) {
 }
 
 // ── Alt selection and map display ─────────────────────────────────────────────
-const DAY_ALT_SOURCES = ['dayalt-direct','dayalt-paths','dayalt-scenic'];
+// ALL_FLAVOURS is declared above near the flavour colour/label tables.
 let dayAltLayersAdded = false;
 
 function ensureDayAltLayers() {
   if (dayAltLayersAdded || !map.isStyleLoaded()) return;
-  for (const flavour of ['direct','paths','scenic']) {
+  for (const flavour of ALL_FLAVOURS) {
     const src = `dayalt-${flavour}`;
     if (!map.getSource(src)) {
       map.addSource(src, { type: 'geojson', data: emptyGJ() });
-      // Each flavour gets its own source+layer; we control visibility via setData
-      // Selected = 5px opaque; unselected = 3px dimmed
       map.addLayer({ id: src, type: 'line', source: src,
         paint: {
           'line-color': FLAVOUR_COLORS[flavour],
@@ -2742,9 +3880,10 @@ function showDayAltOnMap(alts, selectedFlavour, dayIdx) {
   if (!map.isStyleLoaded()) { map.once('idle', () => showDayAltOnMap(alts, selectedFlavour, dayIdx)); return; }
   ensureDayAltLayers();
   hideSkeleton();
-  for (const [flavour, alt] of Object.entries(alts)) {
+  for (const flavour of ALL_FLAVOURS) {
     const src = map.getSource(`dayalt-${flavour}`);
     if (!src) continue;
+    const alt = alts[flavour];
     if (alt) {
       src.setData({
         type: 'Feature',
@@ -2770,7 +3909,7 @@ function hideSkeleton() {
 }
 
 function clearDayPickerMapLayers() {
-  for (const flavour of ['direct','paths','scenic']) {
+  for (const flavour of ALL_FLAVOURS) {
     const src = map.getSource(`dayalt-${flavour}`);
     if (src) src.setData(emptyGJ());
   }
@@ -2782,7 +3921,7 @@ function selectAlt(flavour) {
   if (!currentDayAlts || !currentDayAlts[flavour]) return;
   pickedFlavour = flavour;
   // Update alt card styles
-  for (const f of ['direct','paths','scenic']) {
+  for (const f of ALL_FLAVOURS) {
     const card = document.getElementById(`altcard-${f}`);
     if (card) card.classList.toggle('selected', f === flavour);
   }
@@ -3079,32 +4218,78 @@ async function replanWithVias() {
   replanPending = true;
   replanQueued = false;
   const hint = document.getElementById('pick-hint');
-  if (hint) { hint.textContent = '↺ Replanning…'; hint.style.display = 'block'; }
+  if (hint) { hint.textContent = '↺ Building custom route…'; hint.style.display = 'block'; }
 
   const { start, end } = getDayBounds(currentDayIdx);
   const viaCoords = customWaypoints.map(w => w.coord);
 
-  try {
-    // Anchor to skeleton so BRouter doesn't shortcut across the full day's
-    // distance. Sample up to 5 skeleton waypoints as intermediate anchors,
-    // then interleave any user-placed custom via-points.
-    // Without anchoring, BRouter finds the direct road between start and end
-    // which can be 3× shorter than the planned skeleton path.
-    const skeletonSegment = getDaySkeletonSegment(currentDayIdx);
-    const skeletonVias = sampleSkeletonWaypoints(skeletonSegment, 5).slice(1, -1); // interior only
-    const waypoints = [start, ...skeletonVias, ...viaCoords, end];
-    const newCoords = await routeBRouter(waypoints);
-    if (newCoords && currentDayAlts[pickedFlavour]) {
-      currentDayAlts[pickedFlavour].coordinates = newCoords;
-      currentDayAlts[pickedFlavour].distanceMetres = totalDist(newCoords);
-      showDayAltOnMap(currentDayAlts, pickedFlavour, currentDayIdx);
-      renderDayPickerBody(currentDayAlts, currentDayIdx);
+  if (viaCoords.length === 0) {
+    // No waypoints left — remove the custom alt and revert pick to direct/paths/scenic
+    delete currentDayAlts.custom;
+    if (pickedFlavour === 'custom') {
+      pickedFlavour = currentDayAlts.direct ? 'direct' : currentDayAlts.paths ? 'paths' : 'scenic';
     }
-  } catch(e) { toast('Replan failed: ' + e.message, 'red'); }
+    showDayAltOnMap(currentDayAlts, pickedFlavour, currentDayIdx);
+    renderDayPickerBody(currentDayAlts, currentDayIdx);
+    if (hint) hint.style.display = 'none';
+    replanPending = false;
+    if (replanQueued) replanWithVias();
+    return;
+  }
 
+  // Show a placeholder card while routing
+  currentDayAlts.custom = { _planning: true };
+  renderDayPickerBody(currentDayAlts, currentDayIdx);
+
+  try {
+    // Skeleton anchors keep the route in the right terrain (national park,
+    // mountain trail). Custom via-points are interleaved after the anchors
+    // so they're honoured on top of the skeleton backbone.
+    const skeletonSegment = getDaySkeletonSegment(currentDayIdx);
+    const skeletonVias = sampleSkeletonWaypoints(skeletonSegment, 7).slice(1, -1); // 5 interior
+    const waypoints = [start, ...skeletonVias, ...viaCoords, end];
+    // Use trekking profile for custom routes — wild camping context means the
+    // user wants to stay off-road as much as possible.
+    const r = await routeBRouterFull(waypoints, 'trekking');
+    if (r.coordinates && r.coordinates.length >= 2) {
+      const dist = totalDist(r.coordinates);
+      currentDayAlts.custom = {
+        coordinates: r.coordinates,
+        distanceMetres: dist,
+        pathPct: r.pathPct,
+        feel: calcFeel(dist, null),
+        surface: r.pathPct != null ? surfaceLabel(r.pathPct) : 'mixed',
+      };
+      // Auto-select the custom alt so the user sees their waypoints routed
+      pickedFlavour = 'custom';
+      // Kick off elevation in background
+      fetchElevationStats(r.coordinates).then(elev => {
+        if (!elev || !currentDayAlts.custom || currentDayAlts.custom._planning) return;
+        currentDayAlts.custom.ascentM = elev.ascentMetres;
+        currentDayAlts.custom.feel = calcFeel(currentDayAlts.custom.distanceMetres, elev.ascentMetres);
+        if (currentDayIdx === currentDayIdx) { // guard stale day
+          const card = document.getElementById('altcard-custom');
+          if (card) {
+            const feelBadge = card.querySelector('.alt-feel-badge');
+            if (feelBadge) feelBadge.textContent = currentDayAlts.custom.feel;
+            let ascentCell = card.querySelector('[data-stat="ascent"]');
+            if (ascentCell) ascentCell.querySelector('.alt-stat-val').textContent = `${elev.ascentMetres}m`;
+          }
+        }
+      });
+    } else {
+      delete currentDayAlts.custom;
+      toast('Custom route failed — try different waypoints', 'red');
+    }
+  } catch(e) {
+    delete currentDayAlts.custom;
+    toast('Custom route failed: ' + e.message, 'red');
+  }
+
+  showDayAltOnMap(currentDayAlts, pickedFlavour, currentDayIdx);
+  renderDayPickerBody(currentDayAlts, currentDayIdx);
   if (hint) hint.style.display = 'none';
   replanPending = false;
-  // If another change happened while we were routing, run again now
   if (replanQueued) replanWithVias();
 }
 
