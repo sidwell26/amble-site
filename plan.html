@@ -620,7 +620,8 @@
 <script>
 const SUPABASE_URL  = 'https://cygimxakzteygjeureqv.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_KPfqJPj4N5It7cy6y7DAZQ_8uIPQ0q8';
-const BROUTER_URL   = 'https://brouter.de/brouter';
+const BROUTER_URL   = 'http://49.12.8.201:17777/brouter';
+const BROUTER_PUBLIC_URL = 'https://brouter.de/brouter';
 const MAP_STYLE     = 'https://tiles.openfreemap.org/styles/liberty';
 const OPEN_ELEVATION_URL = 'https://api.open-elevation.com/api/v1/lookup';
 const DAY_COLORS    = ['#a3e635','#3b82f6','#f59e0b','#a855f7','#ec4899','#14b8a6','#f87171','#22c55e','#06b6d4','#fb923c','#84cc16','#e11d48','#7c3aed','#0ea5e9'];
@@ -984,7 +985,14 @@ async function routeBRouterFull(waypoints, profile = 'hiking-mountain', weighted
     if (trimmedParam) params.set('polylines', trimmedParam); else params.delete('polylines');
   }
   const queryString = params.toString();
-  const r = await fetch(`${BROUTER_URL}?${queryString}`);
+  let r;
+  try {
+    r = await fetch(`${BROUTER_URL}?${queryString}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  } catch (vpsErr) {
+    console.warn('[BR] VPS failed, falling back to brouter.de:', vpsErr);
+    r = await fetch(`${BROUTER_PUBLIC_URL}?${queryString}`);
+  }
   if (!r.ok) {
     const text = await r.text().catch(() => '');
     throw new Error(`Routing failed (${r.status})${text ? ': ' + text.slice(0, 80) : ''}`);
