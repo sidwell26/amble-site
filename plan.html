@@ -629,7 +629,7 @@
 <script>
 const SUPABASE_URL  = 'https://cygimxakzteygjeureqv.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_KPfqJPj4N5It7cy6y7DAZQ_8uIPQ0q8';
-const BROUTER_URL   = 'http://49.12.8.201:17777/brouter';
+const BROUTER_URL   = 'https://brouter.de/brouter';
 const BROUTER_PUBLIC_URL = 'https://brouter.de/brouter';
 const MAP_STYLE     = 'https://tiles.openfreemap.org/styles/liberty';
 const OPEN_ELEVATION_URL = 'https://api.open-elevation.com/api/v1/lookup';
@@ -789,15 +789,24 @@ function onPlaceKey(e, which) {
   if (e.key === 'Enter' && items.length > 0) items[0].click();
 }
 
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
 function showResults(which, results) {
   const el = document.getElementById(`${which}-results`);
   if (!results.length) { el.style.display = 'none'; return; }
-  el.innerHTML = results.map((r, i) =>
-    `<div class="place-result" onclick="selectPlace('${which}',${i})" data-idx="${i}">
-      <div>${r.display_name.split(',')[0]}</div>
-      <div class="place-result-sub">${r.display_name.split(',').slice(1, 3).join(',').trim()}</div>
-    </div>`
-  ).join('');
+  el.innerHTML = results.map((r, i) => {
+    const parts = r.display_name.split(',');
+    const primary = escapeHtml(parts[0]);
+    const secondary = escapeHtml(parts.slice(1, 3).join(',').trim());
+    return `<div class="place-result" onclick="selectPlace('${which}',${i})" data-idx="${i}">
+      <div>${primary}</div>
+      <div class="place-result-sub">${secondary}</div>
+    </div>`;
+  }).join('');
   el._data = results;
   el.style.display = 'block';
 }
@@ -1938,12 +1947,15 @@ async function onStopInput() {
     const results = await searchPlaces(val);
     const el = document.getElementById('stop-results');
     if (!results.length) { el.style.display = 'none'; return; }
-    el.innerHTML = results.map((r, i) =>
-      `<div class="place-result" onclick="selectStop(${i})">
-        <div>${r.display_name.split(',')[0]}</div>
-        <div class="place-result-sub">${r.display_name.split(',').slice(1,3).join(',').trim()}</div>
-      </div>`
-    ).join('');
+    el.innerHTML = results.map((r, i) => {
+      const parts = r.display_name.split(',');
+      const primary = escapeHtml(parts[0]);
+      const secondary = escapeHtml(parts.slice(1, 3).join(',').trim());
+      return `<div class="place-result" onclick="selectStop(${i})">
+        <div>${primary}</div>
+        <div class="place-result-sub">${secondary}</div>
+      </div>`;
+    }).join('');
     el._data = results;
     el.style.display = 'block';
   }, 300);

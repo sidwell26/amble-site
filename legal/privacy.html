@@ -49,7 +49,7 @@
     </header>
 
     <h1>Privacy Policy</h1>
-    <p class="meta">Last updated: 10 May 2026</p>
+    <p class="meta">Last updated: 4 June 2026</p>
 
     <p>This policy describes what Amble does with your data. It's written in plain language because that's how privacy policies should be written. If anything here is unclear, email <a href="mailto:privacy@amble.fit">privacy@amble.fit</a> and we'll fix it.</p>
 
@@ -59,7 +59,7 @@
       <li>We don't have a tracking pixel, an analytics SDK, or an advertising network.</li>
       <li>We don't sell, rent, or share your data. There is no business model that involves your data.</li>
       <li>Some features need to send anonymous queries to public mapping services (described below). These services see a coordinate or a search term, but they don't know who you are.</li>
-      <li>If you sign in (optional, currently disabled), your saved walks back up to a cloud database we run. That's the only time your data leaves your device tied to your account.</li>
+      <li>If you sign in (optional), your saved walks back up to a cloud database we run. That's the only time your data leaves your device tied to your account.</li>
     </ul>
 
     <h2>What data Amble handles</h2>
@@ -113,21 +113,26 @@
     <p>These services have their own privacy policies; see <em>Third-party services</em> below. None receive any identifier that links the request to you, your device, or your phone number.</p>
 
     <h3>Sent to our cloud (only when signed in)</h3>
-    <p>Sign-in is currently disabled in Amble. When sign-in launches, signing in will:</p>
+    <p>Sign-in is optional. When you sign in, Amble will:</p>
     <ul>
-      <li>Create an account using your Apple ID (we receive: a user ID, optionally your name and email if you choose to share them)</li>
-      <li>Back up your saved walks to a database we run on Supabase, so you can restore them on a new phone</li>
-      <li>Optionally back up walk photos to our cloud storage</li>
+      <li>Create an account using your Apple ID or Google account (we receive: a user ID, optionally your name and email if you choose to share them)</li>
+      <li>Back up your saved walks, dog profiles, preferences, and personal POIs to a database we run on Supabase, so you can restore them on a new phone</li>
+      <li>Optionally back up walk photos to our private cloud storage (photos are not publicly accessible)</li>
+      <li>Register a push notification token for your device (so we can send walk reminder notifications you've opted into). This token is tied to your account and deleted when you sign out.</li>
+      <li>Store a stable device identifier alongside your push token to handle token rotation on reinstall. This identifier is not used for tracking or advertising.</li>
     </ul>
     <p>The cloud copy is encrypted in transit (HTTPS) and at rest (Supabase encrypts its disks). You can delete your account at any time from the Profile tab; deleting wipes everything we hold within 30 days.</p>
 
-    <h3>Apple Health (not available in this version)</h3>
-    <p>Apple Health integration is not enabled in v1.0. No health data is read or written. When enabled in a future version, Amble will:</p>
+    <h3>Apple Health and Google Health Connect</h3>
+    <p>If you grant permission, Amble can:</p>
     <ul>
       <li>Read your past walking workouts to populate your Amble history</li>
-      <li>Write each finished Amble walk back to Health as an <code>HKWorkout</code> so it counts toward your activity rings</li>
+      <li>Write each finished Amble walk back to Health as a workout so it counts toward your activity rings</li>
     </ul>
-    <p>This data flows directly between Amble and the iOS Health system. It is not transmitted to our servers.</p>
+    <p>This data flows directly between Amble and the iOS Health / Android Health Connect system. It is not transmitted to our servers. You can revoke this permission at any time in your device settings.</p>
+
+    <h3>Web planner (amble.fit/plan)</h3>
+    <p>If you use the web trip planner, it stores your sign-in session in your browser's local storage so you stay logged in. No cookies are used. Route planning queries are sent to BRouter (an open-source routing service) over HTTPS; these contain route coordinates but no account information.</p>
 
     <h2>Permissions Amble asks for</h2>
     <table>
