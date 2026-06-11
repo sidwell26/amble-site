@@ -413,6 +413,15 @@
   <header class="topbar">
     <a href="/" class="topbar-brand">Amble</a>
     <span class="topbar-title">Multi-day trip planner</span>
+    <button onclick="toggleCustomRoutePanel()" id="cr-topbar-btn" style="
+      padding:6px 12px;border-radius:8px;border:1px solid var(--border);
+      background:none;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;
+      display:flex;align-items:center;gap:6px;white-space:nowrap;transition:border-color 0.15s,color 0.15s;
+    " onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+       onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7c0 4-7 8-7 10M12 7c0 4 7 8 7 10"/></svg>
+      Custom route
+    </button>
     <div class="topbar-auth">
       <span id="user-display" style="font-size:12px;color:var(--text3)"></span>
       <button class="btn btn-outline btn-sm" onclick="signOut()">Sign out</button>
@@ -620,6 +629,47 @@
     <div style="flex:1;position:relative">
       <div id="map" style="width:100%;height:100%"></div>
       <div id="pick-hint"></div>
+      <!-- Map style toggle -->
+      <button id="topo-btn" onclick="toggleMapStyle()" title="Toggle terrain map" style="
+        position:absolute;bottom:120px;right:10px;z-index:10;
+        width:36px;height:36px;border-radius:8px;border:none;cursor:pointer;
+        background:var(--surface);box-shadow:0 1px 4px rgba(0,0,0,0.4);
+        font-size:18px;display:flex;align-items:center;justify-content:center;
+        color:var(--text2);transition:background 0.15s;
+      ">🏔</button>
+      <!-- Custom route panel -->
+      <div id="custom-route-panel" style="
+        display:none;position:absolute;top:10px;left:10px;z-index:20;
+        background:var(--surface);border:1px solid var(--border);border-radius:12px;
+        padding:14px;width:240px;box-shadow:0 4px 16px rgba(0,0,0,0.4);
+      ">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">Custom route</span>
+          <button onclick="closeCustomRoutePanel()" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:0;line-height:1">✕</button>
+        </div>
+        <p style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.4">Click points on the map to add waypoints. BRouter finds the best walking path between them.</p>
+        <div id="cr-waypoints" style="margin-bottom:10px;display:flex;flex-direction:column;gap:4px"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button onclick="routeCustomWaypoints()" id="cr-route-btn" disabled style="
+            flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;
+            background:var(--accent);color:#0a0a0a;font-size:12px;font-weight:700;
+            opacity:0.4;
+          ">Route</button>
+          <button onclick="clearCustomRoute()" style="
+            padding:9px 12px;border-radius:8px;border:1px solid var(--border);
+            background:none;color:var(--text2);font-size:12px;cursor:pointer;
+          ">Clear</button>
+        </div>
+        <div id="cr-stats" style="display:none;font-size:11px;color:var(--text2);text-align:center;padding:6px;background:var(--surface2);border-radius:6px;margin-bottom:8px"></div>
+        <button onclick="exportCustomRouteGpx()" id="cr-export-btn" disabled style="
+          width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);
+          background:none;color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;
+          display:flex;align-items:center;justify-content:center;gap:6px;opacity:0.4;
+        ">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export GPX
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -682,12 +732,22 @@ map.on('load', () => {
       paint: { 'line-color': DAY_COLORS[i], 'line-width': 5, 'line-opacity': 0.9 },
       layout: { 'line-cap': 'round', 'line-join': 'round' } });
   }
+  // Custom route layer
+  map.addSource('custom-route', { type: 'geojson', data: emptyGJ() });
+  map.addLayer({ id: 'custom-route', type: 'line', source: 'custom-route',
+    paint: { 'line-color': '#f59e0b', 'line-width': 4, 'line-opacity': 0.95 },
+    layout: { 'line-cap': 'round', 'line-join': 'round' } });
 });
 
 map.on('click', e => {
   const { lng, lat } = e.lngLat;
   // Dismiss accommodation confirmation popup on any map background click
   if (sleepConfirmPopup) { closeSleepConfirm(); return; }
+  // Custom route waypoint picking takes precedence when panel is open
+  if (crPickingActive && document.getElementById('custom-route-panel')?.style.display !== 'none' && !pickingMode && !waypointMode) {
+    addCrWaypoint(lat, lng);
+    return;
+  }
   // Waypoint mode takes precedence (used during day picker step)
   if (waypointMode) {
     onMapTapWaypoint(lat, lng);
@@ -4739,6 +4799,268 @@ function newTrip() {
   document.getElementById('gpx-import-name').textContent = '';
   document.getElementById('candidates-strip').style.display = 'none';
   goToStep(1); updateGenBtn();
+}
+
+// ── Map style toggle (🏔 topo) ────────────────────────────────────────────────
+let mapStyleMode = 'standard'; // 'standard' | 'topo'
+const TOPO_STYLE = {
+  version: 8,
+  sources: {
+    'opentopomap': {
+      type: 'raster',
+      tiles: [
+        'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
+        'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
+        'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      maxzoom: 17,
+      attribution: '© OpenStreetMap contributors, SRTM · Map style: © OpenTopoMap (CC-BY-SA)',
+    },
+  },
+  layers: [{ id: 'opentopomap', type: 'raster', source: 'opentopomap' }],
+};
+
+function toggleMapStyle() {
+  const btn = document.getElementById('topo-btn');
+  if (mapStyleMode === 'standard') {
+    mapStyleMode = 'topo';
+    map.setStyle(TOPO_STYLE);
+    btn.style.background = 'var(--accent)';
+    btn.style.color = '#0a0a0a';
+    // Re-add route sources/layers after style change
+    map.once('styledata', () => {
+      rebuildMapLayers();
+    });
+  } else {
+    mapStyleMode = 'standard';
+    map.setStyle(MAP_STYLE);
+    btn.style.background = 'var(--surface)';
+    btn.style.color = 'var(--text2)';
+    map.once('styledata', () => {
+      rebuildMapLayers();
+    });
+  }
+}
+
+function rebuildMapLayers() {
+  // Re-add day segment sources and layers
+  for (let i = 0; i < 14; i++) {
+    if (!map.getSource(`seg${i}`)) {
+      map.addSource(`seg${i}`, { type: 'geojson', data: emptyGJ() });
+      map.addLayer({ id: `seg${i}`, type: 'line', source: `seg${i}`,
+        paint: { 'line-color': DAY_COLORS[i], 'line-width': 5, 'line-opacity': 0.9 },
+        layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    }
+  }
+  // Re-add day alt sources
+  for (const f of ['direct', 'paths', 'scenic']) {
+    const id = `dayalt-${f}`;
+    if (!map.getSource(id)) {
+      const col = f === 'direct' ? '#3b82f6' : f === 'paths' ? '#a3e635' : '#a855f7';
+      map.addSource(id, { type: 'geojson', data: emptyGJ() });
+      map.addLayer({ id, type: 'line', source: id,
+        paint: { 'line-color': col, 'line-width': 4, 'line-opacity': 0.85, 'line-dasharray': [2, 1.5] },
+        layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    }
+  }
+  // Re-add custom route source
+  if (!map.getSource('custom-route')) {
+    map.addSource('custom-route', { type: 'geojson', data: emptyGJ() });
+    map.addLayer({ id: 'custom-route', type: 'line', source: 'custom-route',
+      paint: { 'line-color': '#f59e0b', 'line-width': 4, 'line-opacity': 0.95 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' } });
+  }
+  // Re-render any existing route data
+  if (dayRoutes && dayRoutes.length > 0) {
+    dayRoutes.forEach((coords, i) => {
+      const src = map.getSource(`seg${i}`);
+      if (src && coords) src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.map(c => [c.longitude, c.latitude]) }, properties: {} }] });
+    });
+  }
+  if (crRouteCoords.length > 0) drawCustomRoute(crRouteCoords);
+}
+
+// ── Custom route ──────────────────────────────────────────────────────────────
+let crWaypoints = []; // [{lat, lon, marker}]
+let crRouteCoords = [];
+let crRouteLine = null;
+let crPickingActive = false;
+
+function toggleCustomRoutePanel() {
+  const panel = document.getElementById('custom-route-panel');
+  const isOpen = panel.style.display !== 'none';
+  if (isOpen) {
+    closeCustomRoutePanel();
+  } else {
+    panel.style.display = 'block';
+    crPickingActive = true;
+    map.getCanvas().style.cursor = 'crosshair';
+    document.getElementById('pick-hint').textContent = 'Click the map to add waypoints';
+    document.getElementById('pick-hint').style.display = 'block';
+  }
+}
+
+function closeCustomRoutePanel() {
+  document.getElementById('custom-route-panel').style.display = 'none';
+  crPickingActive = false;
+  map.getCanvas().style.cursor = '';
+  const hint = document.getElementById('pick-hint');
+  hint.style.display = 'none';
+}
+
+function addCrWaypoint(lat, lon) {
+  const idx = crWaypoints.length;
+  const isFirst = idx === 0;
+  const el = document.createElement('div');
+  el.style.cssText = `width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5);cursor:grab;background:${isFirst ? '#a3e635' : '#f59e0b'};color:${isFirst ? '#0a0a0a' : '#0a0a0a'}`;
+  el.textContent = isFirst ? 'S' : idx;
+  const marker = new maplibregl.Marker({ element: el, draggable: true })
+    .setLngLat([lon, lat])
+    .addTo(map);
+  marker.on('dragend', () => {
+    const ll = marker.getLngLat();
+    crWaypoints[crWaypoints.indexOf(wpt)].lat = ll.lat;
+    crWaypoints[crWaypoints.indexOf(wpt)].lon = ll.lng;
+    if (crRouteCoords.length > 0) routeCustomWaypoints();
+  });
+  const wpt = { lat, lon, marker };
+  crWaypoints.push(wpt);
+  renderCrWaypointList();
+  updateCrRouteBtn();
+}
+
+function removeCrWaypoint(idx) {
+  crWaypoints[idx].marker.remove();
+  crWaypoints.splice(idx, 1);
+  // Renumber remaining marker labels
+  crWaypoints.forEach((w, i) => {
+    w.marker.getElement().textContent = i === 0 ? 'S' : i;
+    w.marker.getElement().style.background = i === 0 ? '#a3e635' : '#f59e0b';
+    w.marker.getElement().style.color = '#0a0a0a';
+  });
+  renderCrWaypointList();
+  updateCrRouteBtn();
+  if (crWaypoints.length < 2) {
+    const src = map.getSource('custom-route');
+    if (src) src.setData(emptyGJ());
+    crRouteCoords = [];
+    document.getElementById('cr-stats').style.display = 'none';
+    const exportBtn = document.getElementById('cr-export-btn');
+    exportBtn.disabled = true; exportBtn.style.opacity = '0.4';
+  }
+}
+
+function renderCrWaypointList() {
+  const el = document.getElementById('cr-waypoints');
+  if (crWaypoints.length === 0) {
+    el.innerHTML = '<p style="font-size:11px;color:var(--text3);text-align:center">No waypoints yet — click the map</p>';
+    return;
+  }
+  el.innerHTML = crWaypoints.map((w, i) => `
+    <div style="display:flex;align-items:center;gap:6px;padding:4px 6px;background:var(--surface2);border-radius:6px;font-size:11px">
+      <span style="width:16px;height:16px;border-radius:50%;background:${i === 0 ? '#a3e635' : '#f59e0b'};color:#0a0a0a;font-weight:900;font-size:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i === 0 ? 'S' : i}</span>
+      <span style="flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${w.lat.toFixed(4)}, ${w.lon.toFixed(4)}</span>
+      <button onclick="removeCrWaypoint(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:0;font-size:13px;line-height:1">✕</button>
+    </div>
+  `).join('');
+}
+
+function updateCrRouteBtn() {
+  const btn = document.getElementById('cr-route-btn');
+  const ready = crWaypoints.length >= 2;
+  btn.disabled = !ready;
+  btn.style.opacity = ready ? '1' : '0.4';
+  btn.style.cursor = ready ? 'pointer' : 'not-allowed';
+}
+
+async function routeCustomWaypoints() {
+  if (crWaypoints.length < 2) return;
+  const btn = document.getElementById('cr-route-btn');
+  btn.textContent = '…routing';
+  btn.disabled = true;
+  try {
+    const waypoints = crWaypoints.map(w => ({ latitude: w.lat, longitude: w.lon }));
+    const lonlats = waypoints.map(p => `${p.longitude.toFixed(6)},${p.latitude.toFixed(6)}`).join('|');
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
+    let res = await fetch(url).catch(() => null);
+    if (!res || !res.ok) {
+      res = await fetch(`${BROUTER_PUBLIC_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`).catch(() => null);
+    }
+    if (!res || !res.ok) throw new Error('Routing failed');
+    const data = await res.json();
+    const feature = data.features?.[0];
+    if (!feature) throw new Error('No route');
+    const coords = feature.geometry.coordinates.map(([lon, lat]) => ({ latitude: lat, longitude: lon }));
+    crRouteCoords = coords;
+    drawCustomRoute(coords);
+    // Stats
+    const distM = feature.properties?.['track-length'] || calcRouteLength(coords);
+    const ascentM = feature.properties?.['filtered ascent'] || 0;
+    const distKm = (distM / 1000).toFixed(1);
+    const ascentStr = ascentM > 0 ? ` · ↑${Math.round(ascentM)}m` : '';
+    document.getElementById('cr-stats').textContent = `${distKm} km${ascentStr}`;
+    document.getElementById('cr-stats').style.display = 'block';
+    const exportBtn = document.getElementById('cr-export-btn');
+    exportBtn.disabled = false; exportBtn.style.opacity = '1';
+    toast('Route found', 'green');
+  } catch (e) {
+    toast('Routing failed — try different waypoints', 'red');
+  } finally {
+    btn.textContent = 'Route';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+  }
+}
+
+function drawCustomRoute(coords) {
+  if (!map.getSource('custom-route')) {
+    map.addSource('custom-route', { type: 'geojson', data: emptyGJ() });
+    map.addLayer({ id: 'custom-route', type: 'line', source: 'custom-route',
+      paint: { 'line-color': '#f59e0b', 'line-width': 4, 'line-opacity': 0.95 },
+      layout: { 'line-cap': 'round', 'line-join': 'round' } });
+  }
+  map.getSource('custom-route').setData({
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: { type: 'LineString',
+      coordinates: coords.map(c => [c.longitude, c.latitude]) }, properties: {} }]
+  });
+}
+
+function calcRouteLength(coords) {
+  let d = 0;
+  for (let i = 1; i < coords.length; i++) d += haversine(coords[i-1], coords[i]);
+  return d;
+}
+
+function clearCustomRoute() {
+  crWaypoints.forEach(w => w.marker.remove());
+  crWaypoints = [];
+  crRouteCoords = [];
+  const src = map.getSource('custom-route');
+  if (src) src.setData(emptyGJ());
+  document.getElementById('cr-stats').style.display = 'none';
+  document.getElementById('cr-waypoints').innerHTML = '';
+  renderCrWaypointList();
+  updateCrRouteBtn();
+  const exportBtn = document.getElementById('cr-export-btn');
+  exportBtn.disabled = true; exportBtn.style.opacity = '0.4';
+}
+
+function exportCustomRouteGpx() {
+  if (crRouteCoords.length === 0) return;
+  const pts = crRouteCoords.map(c => `    <trkpt lat="${c.latitude.toFixed(6)}" lon="${c.longitude.toFixed(6)}"></trkpt>`).join('\n');
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Amble" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>Custom Route</name><trkseg>
+${pts}
+  </trkseg></trk>
+</gpx>`;
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'amble-custom-route.gpx';
+  a.click();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
