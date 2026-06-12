@@ -490,7 +490,13 @@
           </div>
         </div>
 
-        <button class="btn btn-accent" id="gen-btn" onclick="generateSkeleton()" disabled>
+        <!-- Custom route toggle -->
+        <label class="loop-row" style="margin-bottom:12px;margin-top:4px">
+          <input type="checkbox" id="is-custom-route" onchange="onCustomRouteToggle()">
+          <span>Custom route (place waypoints per day)</span>
+        </label>
+
+        <button class="btn btn-accent" id="gen-btn" onclick="customRouteMode ? goToStep('waypoints') : generateSkeleton()" disabled>
           Generate route candidates
         </button>
         <div id="gen-err" style="font-size:12px;color:var(--red);margin-top:8px;min-height:16px"></div>
@@ -509,16 +515,6 @@
         <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px;line-height:1.5">
           Garmin, AllTrails, Komoot, Strava — any GPX 1.0/1.1. Day cuts placed automatically, adjust with sliders.
         </p>
-
-        <div class="gpx-divider" style="margin-top:16px">
-          <div class="gpx-divider-line"></div>
-          <div class="gpx-divider-text">or build your own</div>
-          <div class="gpx-divider-line"></div>
-        </div>
-        <button class="btn btn-outline" onclick="enterCustomRouteMode()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M5 17V11a6 6 0 0 1 6-6h2"/></svg>
-          Custom route with waypoints
-        </button>
       </div>
 
       <!-- Panel 2: Skeleton review -->
@@ -568,6 +564,35 @@
           <button class="btn btn-outline btn-sm" onclick="goBack()" style="width:100%;margin-bottom:8px">‹ Change start / finish</button>
           <button class="btn btn-outline btn-sm" onclick="regenerate()" style="width:100%;margin-bottom:8px">↺ Regenerate candidates</button>
           <button class="btn btn-accent" onclick="confirmSkeleton()">Confirm skeleton →</button>
+        </div>
+      </div>
+
+      <!-- Panel: Custom waypoints builder (replaces skeleton review in custom mode) -->
+      <div id="p-waypoints" style="display:none;flex-direction:column;overflow:hidden">
+        <div class="day-picker-header">
+          <button class="day-picker-back" onclick="goToStep(1)">‹ Back</button>
+          <div class="day-picker-title">Add waypoints</div>
+        </div>
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+          <p style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:10px">Select a day tab, then click the map to place must-pass waypoints for that day. BRouter routes between them.</p>
+          <!-- Day tabs -->
+          <div id="wp-day-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+          <!-- POI filters -->
+          <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:6px">Show on map</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px" id="wp-poi-chips">
+            <div class="poi-chip" id="wp-chip-landmark" onclick="toggleWpPoi('landmark')">🏛 Landmarks</div>
+            <div class="poi-chip" id="wp-chip-water" onclick="toggleWpPoi('water')">💧 Water</div>
+            <div class="poi-chip" id="wp-chip-shop" onclick="toggleWpPoi('shop')">🛒 Food</div>
+            <div class="poi-chip" id="wp-chip-camp" onclick="toggleWpPoi('camp')">⛺ Stay</div>
+          </div>
+          <!-- Waypoint list for active day -->
+          <div id="wp-day-waypoints" style="margin-bottom:10px;display:flex;flex-direction:column;gap:4px">
+            <p style="font-size:11px;color:var(--text3)">Click the map to add waypoints for Day 1</p>
+          </div>
+          <button class="btn btn-accent" id="wp-build-btn" onclick="buildSkeletonFromWaypoints()" disabled style="opacity:0.4">
+            Build skeleton from waypoints →
+          </button>
+          <div id="wp-err" style="font-size:12px;color:var(--red);margin-top:6px;min-height:14px"></div>
         </div>
       </div>
 
@@ -622,30 +647,6 @@
         </p>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
           <button class="btn btn-outline btn-sm" onclick="newTrip()" style="width:100%">+ Plan another trip</button>
-        </div>
-      </div>
-
-      <!-- Custom route panel (sidebar mode) -->
-      <div id="p-custom" style="display:none;flex-direction:column;flex:1;overflow:hidden">
-        <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-          <button onclick="exitCustomRouteMode()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:0;line-height:1;flex-shrink:0">‹</button>
-          <span style="font-size:13px;font-weight:700;color:var(--text)">Custom route</span>
-        </div>
-        <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
-          <p style="font-size:12px;color:var(--text3);line-height:1.5;margin-bottom:12px">Click points on the map to build a route. BRouter finds the best walking path between them.</p>
-          <div id="cr-waypoints" style="margin-bottom:10px;display:flex;flex-direction:column;gap:4px">
-            <p style="font-size:11px;color:var(--text3);text-align:center">No waypoints yet — click the map</p>
-          </div>
-          <button class="waypoint-toggle" id="cr-add-btn" onclick="toggleCrPicking()" style="width:100%;margin-bottom:10px">+ Add waypoint (click map)</button>
-          <div style="display:flex;gap:6px;margin-bottom:8px">
-            <button onclick="routeCustomWaypoints()" id="cr-route-btn" disabled class="btn btn-accent" style="flex:1;opacity:0.4">Route</button>
-            <button onclick="clearCustomRoute()" class="btn btn-outline" style="width:auto;padding:10px 16px">Clear</button>
-          </div>
-          <div id="cr-stats" style="display:none;font-size:12px;color:var(--text2);text-align:center;padding:8px;background:var(--surface2);border-radius:8px;margin-bottom:10px;font-weight:600"></div>
-          <button onclick="exportCustomRouteGpx()" id="cr-export-btn" disabled class="btn-gpx-export" style="opacity:0.4">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Export GPX
-          </button>
         </div>
       </div>
 
@@ -735,9 +736,9 @@ map.on('click', e => {
   const { lng, lat } = e.lngLat;
   // Dismiss accommodation confirmation popup on any map background click
   if (sleepConfirmPopup) { closeSleepConfirm(); return; }
-  // Custom route waypoint picking — only active in custom route mode
-  if (inCustomRouteMode && crPickingActive && !pickingMode && !waypointMode) {
-    addCrWaypoint(lat, lng);
+  // Waypoint builder picking — only active on the waypoints step
+  if (wpPickingActive && currentStep === 'waypoints' && !pickingMode && !waypointMode) {
+    addWpWaypoint(lat, lng);
     return;
   }
   // Waypoint mode takes precedence (used during day picker step)
@@ -2811,33 +2812,42 @@ async function scoreAllCandidates(cands) {
 }
 
 // ── Step flow ─────────────────────────────────────────────────────────────────
-const STEP_IDS = ['p1','p2','p25','p3','p4'];
+const STEP_IDS = ['p1','p2','p-waypoints','p25','p3','p4'];
 
 function goToStep(n) {
   // Clean up sleep-step map layers when leaving
   if (currentStep === 2.5 && n !== 2.5) {
-    closeSleepConfirm(); // dismiss any open popup before navigating away
+    closeSleepConfirm();
     removeGreenOverlays();
     removeSleepSegmentHighlights();
   }
+  // Stop waypoint picking when leaving waypoints step
+  if (currentStep === 'waypoints' && n !== 'waypoints') {
+    wpPickingActive = false;
+    map.getCanvas().style.cursor = '';
+    document.getElementById('pick-hint').style.display = 'none';
+    clearWpPoiMarkers();
+  }
   currentStep = n;
-  STEP_IDS.forEach((id, i) => {
+  STEP_IDS.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  const panelMap = { 1:'p1', 2:'p2', 2.5:'p25', 3:'p3', 4:'p4' };
+  const panelMap = { 1:'p1', 2:'p2', 'waypoints':'p-waypoints', 2.5:'p25', 3:'p3', 4:'p4' };
   const el = document.getElementById(panelMap[n]);
-  if (el) el.style.display = n === 3 ? 'block' : n === 2.5 ? 'block' : 'block';
+  if (el) el.style.display = 'block';
 
-  // Step indicator bar (5 steps)
+  // Step indicator bar
   const stepOrder = [1, 2, 2.5, 3, 4];
-  const nIdx = stepOrder.indexOf(n);
+  const displayN = n === 'waypoints' ? 2 : n;
+  const nIdx = stepOrder.indexOf(displayN);
   ['s1','s2','s25','s3','s4'].forEach((id, i) => {
     const s = document.getElementById(id);
     if (!s) return;
     s.className = 'step' + (i < nIdx ? ' done' : i === nIdx ? ' active' : '');
   });
 
+  if (n === 'waypoints') { renderWpDayTabs(); }
   if (n === 4) { renderSummary(); renderFinalMap(); }
 }
 
@@ -4770,6 +4780,19 @@ function newTrip() {
   resetElevProfile();
   clearCustomWaypoints();
   clearPoiMarkers();
+  // Reset custom route state
+  customRouteMode = false;
+  const crChk = document.getElementById('is-custom-route');
+  if (crChk) crChk.checked = false;
+  wpDayWaypoints.forEach(day => day.forEach((_, i) => {}));
+  wpDayMarkers.forEach(day => day.forEach(m => m?.remove()));
+  wpDayWaypoints = []; wpDayMarkers = [];
+  wpPickingActive = false; wpActiveDayIdx = 0;
+  clearWpPoiMarkers();
+  wpPois = {}; wpPoiOn = { landmark: false, water: false, shop: false, camp: false };
+  map.getCanvas().style.cursor = '';
+  const genBtn = document.getElementById('gen-btn');
+  if (genBtn) { genBtn.textContent = 'Generate route candidates'; genBtn.onclick = generateSkeleton; }
   poiData = { water: [], shop: [], landmark: [] };
   poiVisible = { water: false, shop: false, landmark: false };
   if (startMarker) { startMarker.remove(); startMarker = null; }
@@ -4873,62 +4896,293 @@ function rebuildMapLayers() {
   if (crRouteCoords.length > 0) drawCustomRoute(crRouteCoords);
 }
 
-// ── Custom route ──────────────────────────────────────────────────────────────
-let crWaypoints = []; // [{lat, lon, marker}]
-let crRouteCoords = [];
-let crPickingActive = false;
-let inCustomRouteMode = false;
+// ── Custom route toggle (frame step) ─────────────────────────────────────────
+let customRouteMode = false;
 
-function enterCustomRouteMode() {
-  inCustomRouteMode = true;
-  // Hide all trip planner panels, show custom route panel
-  ['p1','p2','p25','p3','p4'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
-  });
-  document.getElementById('candidates-strip').style.display = 'none';
-  const panel = document.getElementById('p-custom');
-  panel.style.display = 'flex';
-  // Auto-start picking
-  crPickingActive = true;
-  map.getCanvas().style.cursor = 'crosshair';
-  document.getElementById('pick-hint').textContent = '📍 Click the map to add waypoints';
-  document.getElementById('pick-hint').style.display = 'block';
-  updateCrAddBtn();
-}
-
-function exitCustomRouteMode() {
-  inCustomRouteMode = false;
-  crPickingActive = false;
-  map.getCanvas().style.cursor = '';
-  document.getElementById('pick-hint').style.display = 'none';
-  document.getElementById('p-custom').style.display = 'none';
-  // Return to trip planner step 1
-  goToStep(1);
-}
-
-function toggleCrPicking() {
-  crPickingActive = !crPickingActive;
-  map.getCanvas().style.cursor = crPickingActive ? 'crosshair' : '';
-  const hint = document.getElementById('pick-hint');
-  if (crPickingActive) {
-    hint.textContent = '📍 Click the map to add waypoints';
-    hint.style.display = 'block';
+function onCustomRouteToggle() {
+  customRouteMode = document.getElementById('is-custom-route').checked;
+  const btn = document.getElementById('gen-btn');
+  if (customRouteMode) {
+    btn.textContent = 'Place waypoints →';
+    btn.onclick = () => goToStep('waypoints');
   } else {
-    hint.style.display = 'none';
+    btn.textContent = 'Generate route candidates';
+    btn.onclick = generateSkeleton;
   }
-  updateCrAddBtn();
+  updateGenBtn();
 }
 
-function updateCrAddBtn() {
-  const btn = document.getElementById('cr-add-btn');
-  if (!btn) return;
-  if (crPickingActive) {
-    btn.textContent = '✕ Stop adding waypoints';
-    btn.classList.add('on');
-  } else {
-    btn.textContent = '+ Add waypoint (click map)';
-    btn.classList.remove('on');
+// ── Waypoint builder (custom route step 2) ────────────────────────────────────
+let wpDayWaypoints = []; // Coordinates[][] — one array per day
+let wpActiveDayIdx = 0;
+let wpPickingActive = false;
+let wpDayMarkers = []; // markers[][] — one array per day
+let wpPois = {}; // kind → [{coord, name, marker}]
+let wpPoiOn = { landmark: false, water: false, shop: false, camp: false };
+let wpPoiFetching = {};
+const WP_POI_COLORS = { landmark: '#a855f7', water: '#3b82f6', shop: '#f59e0b', camp: '#22c55e' };
+const WP_POI_EMOJIS = { landmark: '🏛', water: '💧', shop: '🛒', camp: '⛺' };
+
+function renderWpDayTabs() {
+  const n = parseInt(document.getElementById('day-count').value) || 3;
+  // Init arrays if needed
+  while (wpDayWaypoints.length < n) wpDayWaypoints.push([]);
+  while (wpDayMarkers.length < n) wpDayMarkers.push([]);
+  wpDayWaypoints = wpDayWaypoints.slice(0, n);
+  wpDayMarkers = wpDayMarkers.slice(0, n);
+
+  const tabs = document.getElementById('wp-day-tabs');
+  tabs.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const count = wpDayWaypoints[i].length;
+    const active = i === wpActiveDayIdx;
+    const col = DAY_COLORS[i];
+    const btn = document.createElement('button');
+    btn.style.cssText = `padding:6px 12px;border-radius:8px;border:2px solid ${active ? col : 'var(--border)'};background:${active ? col + '22' : 'var(--surface2)'};color:${active ? col : 'var(--text2)'};font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s`;
+    btn.textContent = `Day ${i+1}${count > 0 ? ` · ${count}` : ''}`;
+    btn.onclick = () => { wpActiveDayIdx = i; renderWpDayTabs(); renderWpDayList(); };
+    tabs.appendChild(btn);
+  }
+
+  // Enable picking
+  wpPickingActive = true;
+  map.getCanvas().style.cursor = 'crosshair';
+  document.getElementById('pick-hint').textContent = `📍 Click map to add waypoints for Day ${wpActiveDayIdx + 1}`;
+  document.getElementById('pick-hint').style.display = 'block';
+
+  updateWpBuildBtn();
+  renderWpDayList();
+  renderWpMarkersOnMap();
+}
+
+function renderWpDayList() {
+  const el = document.getElementById('wp-day-waypoints');
+  const wpts = wpDayWaypoints[wpActiveDayIdx] || [];
+  if (wpts.length === 0) {
+    el.innerHTML = `<p style="font-size:11px;color:var(--text3)">Click the map to add waypoints for Day ${wpActiveDayIdx + 1}</p>`;
+    return;
+  }
+  el.innerHTML = wpts.map((c, i) => `
+    <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--surface2);border-radius:6px;font-size:11px">
+      <span style="width:18px;height:18px;border-radius:50%;background:${DAY_COLORS[wpActiveDayIdx]};color:#0a0a0a;font-weight:900;font-size:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</span>
+      <span style="flex:1;color:var(--text2)">${c.latitude.toFixed(4)}, ${c.longitude.toFixed(4)}</span>
+      <button onclick="removeWpWaypoint(${wpActiveDayIdx},${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0;line-height:1">✕</button>
+    </div>
+  `).join('');
+}
+
+function addWpWaypoint(lat, lon) {
+  const coord = { latitude: lat, longitude: lon };
+  const dayIdx = wpActiveDayIdx;
+  const idx = wpDayWaypoints[dayIdx].length;
+  const col = DAY_COLORS[dayIdx];
+
+  const el = document.createElement('div');
+  el.style.cssText = `width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;background:${col};color:#0a0a0a;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.5);cursor:pointer`;
+  el.textContent = idx + 1;
+  el.title = 'Click to remove';
+  el.onclick = () => removeWpWaypoint(dayIdx, wpDayWaypoints[dayIdx].indexOf(coord));
+
+  const marker = new maplibregl.Marker({ element: el }).setLngLat([lon, lat]).addTo(map);
+  wpDayWaypoints[dayIdx].push(coord);
+  wpDayMarkers[dayIdx].push(marker);
+
+  renderWpDayTabs();
+  renderWpDayList();
+  updateWpBuildBtn();
+}
+
+function removeWpWaypoint(dayIdx, idx) {
+  if (idx < 0 || idx >= wpDayWaypoints[dayIdx].length) return;
+  wpDayMarkers[dayIdx][idx]?.remove();
+  wpDayWaypoints[dayIdx].splice(idx, 1);
+  wpDayMarkers[dayIdx].splice(idx, 1);
+  // Renumber remaining markers
+  wpDayMarkers[dayIdx].forEach((m, i) => {
+    if (m?.getElement()) m.getElement().textContent = i + 1;
+  });
+  renderWpDayTabs();
+  renderWpDayList();
+  updateWpBuildBtn();
+}
+
+function renderWpMarkersOnMap() {
+  // All markers already on map — this just ensures correct visibility
+}
+
+function updateWpBuildBtn() {
+  const n = parseInt(document.getElementById('day-count').value) || 3;
+  // All days except the last must have at least 1 waypoint
+  const ready = n === 1 || wpDayWaypoints.slice(0, n - 1).every(d => d.length > 0);
+  const btn = document.getElementById('wp-build-btn');
+  btn.disabled = !ready;
+  btn.style.opacity = ready ? '1' : '0.4';
+}
+
+async function toggleWpPoi(kind) {
+  const chip = document.getElementById(`wp-chip-${kind}`);
+  wpPoiOn[kind] = !wpPoiOn[kind];
+
+  const col = WP_POI_COLORS[kind];
+  chip.style.background = wpPoiOn[kind] ? col : '';
+  chip.style.borderColor = wpPoiOn[kind] ? col : '';
+  chip.style.color = wpPoiOn[kind] ? '#fff' : '';
+
+  if (!wpPoiOn[kind]) {
+    // Hide markers
+    (wpPois[kind] || []).forEach(p => p.marker?.remove());
+    return;
+  }
+
+  // Fetch if not cached
+  if (!wpPois[kind]) {
+    if (wpPoiFetching[kind]) return;
+    wpPoiFetching[kind] = true;
+    chip.textContent = WP_POI_EMOJIS[kind] + ' …';
+    try {
+      const origin = trip.start;
+      if (!origin) { toast('Set a start point first', 'red'); wpPoiOn[kind] = false; return; }
+      const n = parseInt(document.getElementById('day-count').value) || 3;
+      const kmDay = parseInt(document.getElementById('km-day').value) || 15;
+      const totalM = n * kmDay * 1000;
+      const radius = Math.min(50000, Math.max(5000, totalM * 0.4));
+      const overpassKind = kind === 'camp' ? 'camp' : kind === 'shop' ? 'shop' : kind === 'water' ? 'water' : 'landmark';
+      const pois = await fetchHikePoisForBuilder(origin, radius, overpassKind);
+      wpPois[kind] = pois;
+    } catch { wpPois[kind] = []; }
+    wpPoiFetching[kind] = false;
+  }
+
+  // Show markers
+  const pois = wpPois[kind] || [];
+  chip.textContent = `${WP_POI_EMOJIS[kind]} ${pois.length}`;
+  pois.forEach(p => {
+    if (p.marker) { p.marker.addTo(map); return; }
+    const el = document.createElement('div');
+    el.style.cssText = `width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;background:${WP_POI_COLORS[kind]};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer`;
+    el.textContent = WP_POI_EMOJIS[kind];
+    el.title = p.name || kind;
+    el.onclick = (e) => { e.stopPropagation(); addWpWaypoint(p.coord.latitude, p.coord.longitude); };
+    p.marker = new maplibregl.Marker({ element: el }).setLngLat([p.coord.longitude, p.coord.latitude]).addTo(map);
+  });
+}
+
+function clearWpPoiMarkers() {
+  Object.values(wpPois).forEach(arr => arr?.forEach(p => p.marker?.remove()));
+}
+
+async function fetchHikePoisForBuilder(origin, radiusM, kind) {
+  const lat = origin.latitude, lon = origin.longitude;
+  const deg = radiusM / 111000;
+  let q = '';
+  if (kind === 'landmark') {
+    q = `[out:json][timeout:15];(node["tourism"~"^(attraction|viewpoint|museum|castle|ruins)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});node["historic"~"^(castle|ruins|monument|memorial)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out 30;`;
+  } else if (kind === 'water') {
+    q = `[out:json][timeout:15];(node["amenity"="drinking_water"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});node["natural"="spring"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out 30;`;
+  } else if (kind === 'shop') {
+    q = `[out:json][timeout:15];(node["shop"~"^(convenience|supermarket|farm|bakery)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});node["amenity"~"^(cafe|pub|restaurant|fast_food)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out 30;`;
+  } else if (kind === 'camp') {
+    q = `[out:json][timeout:15];(node["tourism"~"^(camp_site|hostel|hotel|guest_house|alpine_hut|wilderness_hut)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});way["tourism"~"^(camp_site|hostel|hotel|guest_house)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out center 30;`;
+  }
+  const data = await overpassQuery(q);
+  return (data?.elements || []).map(e => ({
+    name: e.tags?.name || e.tags?.['name:en'] || kind,
+    coord: { latitude: e.lat ?? e.center?.lat ?? 0, longitude: e.lon ?? e.center?.lon ?? 0 },
+    marker: null,
+  })).filter(p => p.coord.latitude !== 0);
+}
+
+async function buildSkeletonFromWaypoints() {
+  const btn = document.getElementById('wp-build-btn');
+  const err = document.getElementById('wp-err');
+  btn.disabled = true; btn.textContent = '⏳ Building…';
+  err.textContent = '';
+
+  const n = parseInt(document.getElementById('day-count').value) || 3;
+  const start = trip.start;
+  const finish = trip.isLoop ? trip.start : trip.finish;
+
+  if (!start || !finish) {
+    err.textContent = 'Set start and finish first.';
+    btn.disabled = false; btn.textContent = 'Build skeleton from waypoints →';
+    return;
+  }
+
+  try {
+    // Build each day segment: start→day1wps→dayEnd1→day2wps→dayEnd2→…→finish
+    // We route each day's waypoints through BRouter and concatenate
+    let allCoords = [];
+    let currentPos = start;
+    const dayEnds = [];
+
+    for (let i = 0; i < n; i++) {
+      const isLast = i === n - 1;
+      const dayTarget = isLast ? finish : null; // day end inferred from waypoints + overall skeleton
+      const wps = wpDayWaypoints[i] || [];
+
+      // For the last day, route to finish; for intermediate days, route to last waypoint
+      const endPos = isLast ? finish : (wps.length > 0 ? wps[wps.length - 1] : null);
+      if (!endPos && !isLast) {
+        // No waypoints for this day — use a simple midpoint along overall route
+        err.textContent = `Day ${i+1} has no waypoints. Add at least one.`;
+        btn.disabled = false; btn.textContent = 'Build skeleton from waypoints →';
+        return;
+      }
+
+      const waypoints = isLast
+        ? [currentPos, ...wps, finish]
+        : [currentPos, ...wps];
+
+      if (waypoints.length < 2) {
+        err.textContent = `Day ${i+1} needs at least one waypoint.`;
+        btn.disabled = false; btn.textContent = 'Build skeleton from waypoints →';
+        return;
+      }
+
+      const { coordinates } = await routeBRouterFull(waypoints, 'trekking');
+      if (!coordinates || coordinates.length < 2) throw new Error(`Day ${i+1} routing failed`);
+
+      const startIdx = allCoords.length;
+      allCoords = allCoords.concat(coordinates);
+
+      if (!isLast) {
+        dayEnds.push({ kind: 'cut', index: allCoords.length - 1 });
+        currentPos = coordinates[coordinates.length - 1];
+      }
+    }
+
+    // Build skeleton object
+    const skeleton = {
+      coordinates: allCoords,
+      distanceMetres: totalDist(allCoords),
+      dayEnds,
+    };
+
+    trip.skeleton = skeleton;
+    trip.skeletonCandidates = [];
+    trip.targetDayCount = n;
+    trip.customRoute = true;
+    trip.dayWaypoints = wpDayWaypoints.map(d => [...d]);
+
+    // Show skeleton on map using existing renderer
+    renderOnMap();
+    placeDayEndMarkers();
+
+    // Proceed to sleep picker or day picker
+    wpPickingActive = false;
+    clearWpPoiMarkers();
+    if (n > 1) {
+      goToStep(2.5);
+      renderSleepStep();
+    } else {
+      startDayPicker();
+    }
+    toast('Skeleton built from your waypoints');
+  } catch(e) {
+    err.textContent = 'Routing failed: ' + (e.message || 'try different waypoints');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Build skeleton from waypoints →';
+    updateWpBuildBtn();
   }
 }
 
