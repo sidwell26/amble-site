@@ -4064,8 +4064,8 @@ const OVERPASS_POI_TAGS = {
     'node["amenity"="restaurant"]',
   ],
   landmark: [
-    'node["natural"="peak"]["name"]',
-    'node["natural"="waterfall"]["name"]',
+    'node["natural"="peak"][name]',
+    'node["natural"="waterfall"]',
     'node["tourism"="viewpoint"]',
     'node["tourism"="attraction"]',
     'node["tourism"="museum"]',
@@ -5083,14 +5083,15 @@ function clearWpPoiMarkers() {
 
 async function fetchHikePoisForBuilder(origin, radiusM, kind) {
   const lat = origin.latitude, lon = origin.longitude;
-  const deg = radiusM / 111000;
+  const deg = Math.min(radiusM / 111000, 0.45); // cap at ~50km
+  const bb = `${lat-deg},${lon-deg},${lat+deg},${lon+deg}`;
   let q = '';
   if (kind === 'landmark') {
-    q = `[out:json][timeout:15];(node["tourism"~"^(attraction|viewpoint|museum|castle|ruins)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});node["historic"~"^(castle|ruins|monument|memorial)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out 30;`;
+    q = `[out:json][timeout:20];(node["natural"="peak"]["name"](${bb});node["natural"="waterfall"](${bb});node["tourism"="viewpoint"](${bb});node["tourism"="attraction"](${bb});node["historic"~"^(castle|ruins|monument|archaeological_site)$"](${bb}););out 60;`;
   } else if (kind === 'water') {
-    q = `[out:json][timeout:15];(node["amenity"="drinking_water"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});node["natural"="spring"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out 30;`;
+    q = `[out:json][timeout:15];(node["amenity"="drinking_water"](${bb});node["natural"="spring"](${bb});node["waterway"="waterfall"](${bb}););out 40;`;
   } else if (kind === 'shop') {
-    q = `[out:json][timeout:15];(node["shop"~"^(convenience|supermarket|farm|bakery)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});node["amenity"~"^(cafe|pub|restaurant|fast_food)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out 30;`;
+    q = `[out:json][timeout:15];(node["shop"~"^(convenience|supermarket|farm|bakery)$"](${bb});node["amenity"~"^(cafe|pub|restaurant|fast_food)$"](${bb}););out 40;`;
   } else if (kind === 'camp') {
     q = `[out:json][timeout:15];(node["tourism"~"^(camp_site|hostel|hotel|guest_house|alpine_hut|wilderness_hut)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg});way["tourism"~"^(camp_site|hostel|hotel|guest_house)$"](${lat-deg},${lon-deg},${lat+deg},${lon+deg}););out center 30;`;
   }
