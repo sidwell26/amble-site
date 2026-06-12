@@ -3812,9 +3812,9 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const pathsWaypoints = [...aw.slice(0, qIdx), pathsNudge, ...aw.slice(qIdx)];
 
   const [rDirect, rPaths, parkVia] = await Promise.all([
-    // Direct: trekking primary route, skeleton anchored, park discount + town penalty
-    routeBRouterFull(aw, 'trekking', dayAllPolylines).catch(() => null),
-    // Paths: trekking + perpendicular nudge at quarter-point, alt=0.
+    // Direct: hiking-mountain for balanced distance — trekking can go wildly off-piste
+    routeBRouterFull(aw, 'hiking-mountain', dayAllPolylines).catch(() => null),
+    // Paths: trekking + perpendicular nudge to prefer footpaths
     routeBRouterFull(pathsWaypoints, 'trekking', dayAllPolylines, 0).catch(() => null),
     scenicViaPromise,
   ]);
@@ -3827,11 +3827,13 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
     ? [...aw.slice(0, midIdx), scenicVia, ...aw.slice(midIdx)]
     : aw;
 
-  // Scenic: trekking + park/detour via + day-level park discount + town penalty
-  const rScenic = await routeBRouterFull(scenicAW, 'trekking', dayAllPolylines).catch(() => null);
+  // Scenic: trekking + park/detour via — trekking profile intentional here for off-road feel
+  const rScenic = await routeBRouterFull(scenicAW, 'hiking-mountain', dayAllPolylines).catch(() => null);
 
   // ── Direct ────────────────────────────────────────────────────────────────
-  if (rDirect?.coordinates?.length >= 2 && !isSpike(rDirect.coordinates)) {
+  // Sanity check: reject routes > 3× the haversine distance (routing gone mad)
+  const maxSaneM = Math.max(directLen * 3, 3000);
+  if (rDirect?.coordinates?.length >= 2 && !isSpike(rDirect.coordinates) && totalDist(rDirect.coordinates) <= maxSaneM) {
     results.direct = makeAlt(rDirect.coordinates, rDirect.pathPct);
   } else if (skeletonSegment?.length >= 2) {
     results.direct = makeAlt(skeletonSegment, null);
@@ -4052,15 +4054,18 @@ const OVERPASS_POI_TAGS = {
     'node["amenity"="drinking_water"]',
     'node["natural"="spring"]',
     'node["amenity"="water_tap"]',
+    'node["waterway"="waterfall"]',
   ],
   shop: [
     'node["shop"="convenience"]',
     'node["shop"="supermarket"]',
     'node["amenity"="cafe"]',
     'node["amenity"="pub"]',
+    'node["amenity"="restaurant"]',
   ],
   landmark: [
-    'node["natural"="peak"]',
+    'node["natural"="peak"]["name"]',
+    'node["natural"="waterfall"]["name"]',
     'node["tourism"="viewpoint"]',
     'node["tourism"="attraction"]',
     'node["tourism"="museum"]',
@@ -4068,7 +4073,6 @@ const OVERPASS_POI_TAGS = {
     'node["historic"="ruins"]',
     'node["historic"="castle"]',
     'node["historic"="archaeological_site"]',
-    'node["amenity"="place_of_worship"]',
   ],
 };
 
@@ -4084,14 +4088,20 @@ async function fetchDayPois(alts, dayIdx) {
     if (c.longitude < minLon) minLon = c.longitude;
     if (c.longitude > maxLon) maxLon = c.longitude;
   }
-  // 1 km padding so POIs near the route edges show up
+  // Cap bbox to ~40km across to avoid Overpass timeout on long days.
+  // If the day route is very long, shrink towards the midpoint.
   const pad = 0.009;
-  const bbox = `${minLat-pad},${minLon-pad},${maxLat+pad},${maxLon+pad}`;
+  const MAX_DEG = 0.35; // ~40km
+  const latSpan = Math.min(maxLat - minLat + pad * 2, MAX_DEG);
+  const lonSpan = Math.min(maxLon - minLon + pad * 2, MAX_DEG);
+  const midLat = (minLat + maxLat) / 2;
+  const midLon = (minLon + maxLon) / 2;
+  const bbox = `${(midLat - latSpan/2).toFixed(5)},${(midLon - lonSpan/2).toFixed(5)},${(midLat + latSpan/2).toFixed(5)},${(midLon + lonSpan/2).toFixed(5)}`;
 
-  // Fire one query per kind in parallel — increase limit to 100 for landmarks
-  await Promise.allSettled(['water','shop','landmark'].map(async kind => {
+  // Fire queries sequentially per kind to avoid hammering Overpass
+  for (const kind of ['water','shop','landmark']) {
     const tagFilters = OVERPASS_POI_TAGS[kind].map(t => `${t}(${bbox});`).join('\n  ');
-    const limit = kind === 'landmark' ? 100 : 50;
+    const limit = kind === 'landmark' ? 80 : 40;
     const q = `[out:json][timeout:20];\n(\n  ${tagFilters}\n);\nout center ${limit};`;
     const data = await overpassQuery(q);
     if (!data) return;
@@ -4128,7 +4138,7 @@ async function fetchDayPois(alts, dayIdx) {
       }
       showPoiMarkers(kind);
     }
-  }));
+  }
 }
 
 function clearPoiMarkers() {
