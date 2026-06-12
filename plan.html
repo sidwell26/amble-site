@@ -413,15 +413,6 @@
   <header class="topbar">
     <a href="/" class="topbar-brand">Amble</a>
     <span class="topbar-title">Multi-day trip planner</span>
-    <button onclick="toggleCustomRoutePanel()" id="cr-topbar-btn" style="
-      padding:6px 12px;border-radius:8px;border:1px solid var(--border);
-      background:none;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;
-      display:flex;align-items:center;gap:6px;white-space:nowrap;transition:border-color 0.15s,color 0.15s;
-    " onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
-       onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7c0 4-7 8-7 10M12 7c0 4 7 8 7 10"/></svg>
-      Custom route
-    </button>
     <div class="topbar-auth">
       <span id="user-display" style="font-size:12px;color:var(--text3)"></span>
       <button class="btn btn-outline btn-sm" onclick="signOut()">Sign out</button>
@@ -518,6 +509,16 @@
         <p style="font-size:11px;color:var(--text3);text-align:center;margin-top:4px;line-height:1.5">
           Garmin, AllTrails, Komoot, Strava — any GPX 1.0/1.1. Day cuts placed automatically, adjust with sliders.
         </p>
+
+        <div class="gpx-divider" style="margin-top:16px">
+          <div class="gpx-divider-line"></div>
+          <div class="gpx-divider-text">or build your own</div>
+          <div class="gpx-divider-line"></div>
+        </div>
+        <button class="btn btn-outline" onclick="enterCustomRouteMode()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/><path d="M5 17V11a6 6 0 0 1 6-6h2"/></svg>
+          Custom route with waypoints
+        </button>
       </div>
 
       <!-- Panel 2: Skeleton review -->
@@ -624,6 +625,30 @@
         </div>
       </div>
 
+      <!-- Custom route panel (sidebar mode) -->
+      <div id="p-custom" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <button onclick="exitCustomRouteMode()" style="background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:0;line-height:1;flex-shrink:0">‹</button>
+          <span style="font-size:13px;font-weight:700;color:var(--text)">Custom route</span>
+        </div>
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+          <p style="font-size:12px;color:var(--text3);line-height:1.5;margin-bottom:12px">Click points on the map to build a route. BRouter finds the best walking path between them.</p>
+          <div id="cr-waypoints" style="margin-bottom:10px;display:flex;flex-direction:column;gap:4px">
+            <p style="font-size:11px;color:var(--text3);text-align:center">No waypoints yet — click the map</p>
+          </div>
+          <button class="waypoint-toggle" id="cr-add-btn" onclick="toggleCrPicking()" style="width:100%;margin-bottom:10px">+ Add waypoint (click map)</button>
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button onclick="routeCustomWaypoints()" id="cr-route-btn" disabled class="btn btn-accent" style="flex:1;opacity:0.4">Route</button>
+            <button onclick="clearCustomRoute()" class="btn btn-outline" style="width:auto;padding:10px 16px">Clear</button>
+          </div>
+          <div id="cr-stats" style="display:none;font-size:12px;color:var(--text2);text-align:center;padding:8px;background:var(--surface2);border-radius:8px;margin-bottom:10px;font-weight:600"></div>
+          <button onclick="exportCustomRouteGpx()" id="cr-export-btn" disabled class="btn-gpx-export" style="opacity:0.4">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export GPX
+          </button>
+        </div>
+      </div>
+
     </aside>
 
     <div style="flex:1;position:relative">
@@ -637,39 +662,6 @@
         font-size:18px;display:flex;align-items:center;justify-content:center;
         color:var(--text2);transition:background 0.15s;
       ">🏔</button>
-      <!-- Custom route panel -->
-      <div id="custom-route-panel" style="
-        display:none;position:absolute;top:10px;left:10px;z-index:20;
-        background:var(--surface);border:1px solid var(--border);border-radius:12px;
-        padding:14px;width:240px;box-shadow:0 4px 16px rgba(0,0,0,0.4);
-      ">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <span style="font-size:13px;font-weight:700;color:var(--text)">Custom route</span>
-          <button onclick="closeCustomRoutePanel()" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:0;line-height:1">✕</button>
-        </div>
-        <p style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.4">Click points on the map to add waypoints. BRouter finds the best walking path between them.</p>
-        <div id="cr-waypoints" style="margin-bottom:10px;display:flex;flex-direction:column;gap:4px"></div>
-        <div style="display:flex;gap:6px;margin-bottom:8px">
-          <button onclick="routeCustomWaypoints()" id="cr-route-btn" disabled style="
-            flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;
-            background:var(--accent);color:#0a0a0a;font-size:12px;font-weight:700;
-            opacity:0.4;
-          ">Route</button>
-          <button onclick="clearCustomRoute()" style="
-            padding:9px 12px;border-radius:8px;border:1px solid var(--border);
-            background:none;color:var(--text2);font-size:12px;cursor:pointer;
-          ">Clear</button>
-        </div>
-        <div id="cr-stats" style="display:none;font-size:11px;color:var(--text2);text-align:center;padding:6px;background:var(--surface2);border-radius:6px;margin-bottom:8px"></div>
-        <button onclick="exportCustomRouteGpx()" id="cr-export-btn" disabled style="
-          width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);
-          background:none;color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;
-          display:flex;align-items:center;justify-content:center;gap:6px;opacity:0.4;
-        ">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Export GPX
-        </button>
-      </div>
     </div>
   </div>
 </div>
@@ -743,8 +735,8 @@ map.on('click', e => {
   const { lng, lat } = e.lngLat;
   // Dismiss accommodation confirmation popup on any map background click
   if (sleepConfirmPopup) { closeSleepConfirm(); return; }
-  // Custom route waypoint picking takes precedence when panel is open
-  if (crPickingActive && document.getElementById('custom-route-panel')?.style.display !== 'none' && !pickingMode && !waypointMode) {
+  // Custom route waypoint picking — only active in custom route mode
+  if (inCustomRouteMode && crPickingActive && !pickingMode && !waypointMode) {
     addCrWaypoint(lat, lng);
     return;
   }
@@ -4884,29 +4876,60 @@ function rebuildMapLayers() {
 // ── Custom route ──────────────────────────────────────────────────────────────
 let crWaypoints = []; // [{lat, lon, marker}]
 let crRouteCoords = [];
-let crRouteLine = null;
 let crPickingActive = false;
+let inCustomRouteMode = false;
 
-function toggleCustomRoutePanel() {
-  const panel = document.getElementById('custom-route-panel');
-  const isOpen = panel.style.display !== 'none';
-  if (isOpen) {
-    closeCustomRoutePanel();
-  } else {
-    panel.style.display = 'block';
-    crPickingActive = true;
-    map.getCanvas().style.cursor = 'crosshair';
-    document.getElementById('pick-hint').textContent = 'Click the map to add waypoints';
-    document.getElementById('pick-hint').style.display = 'block';
-  }
+function enterCustomRouteMode() {
+  inCustomRouteMode = true;
+  // Hide all trip planner panels, show custom route panel
+  ['p1','p2','p25','p3','p4'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  document.getElementById('candidates-strip').style.display = 'none';
+  const panel = document.getElementById('p-custom');
+  panel.style.display = 'flex';
+  // Auto-start picking
+  crPickingActive = true;
+  map.getCanvas().style.cursor = 'crosshair';
+  document.getElementById('pick-hint').textContent = '📍 Click the map to add waypoints';
+  document.getElementById('pick-hint').style.display = 'block';
+  updateCrAddBtn();
 }
 
-function closeCustomRoutePanel() {
-  document.getElementById('custom-route-panel').style.display = 'none';
+function exitCustomRouteMode() {
+  inCustomRouteMode = false;
   crPickingActive = false;
   map.getCanvas().style.cursor = '';
+  document.getElementById('pick-hint').style.display = 'none';
+  document.getElementById('p-custom').style.display = 'none';
+  // Return to trip planner step 1
+  goToStep(1);
+}
+
+function toggleCrPicking() {
+  crPickingActive = !crPickingActive;
+  map.getCanvas().style.cursor = crPickingActive ? 'crosshair' : '';
   const hint = document.getElementById('pick-hint');
-  hint.style.display = 'none';
+  if (crPickingActive) {
+    hint.textContent = '📍 Click the map to add waypoints';
+    hint.style.display = 'block';
+  } else {
+    hint.style.display = 'none';
+  }
+  updateCrAddBtn();
+}
+
+function updateCrAddBtn() {
+  const btn = document.getElementById('cr-add-btn');
+  if (!btn) return;
+  if (crPickingActive) {
+    btn.textContent = '✕ Stop adding waypoints';
+    btn.classList.add('on');
+  } else {
+    btn.textContent = '+ Add waypoint (click map)';
+    btn.classList.remove('on');
+  }
 }
 
 function addCrWaypoint(lat, lon) {
