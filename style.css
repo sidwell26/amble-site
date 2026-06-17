@@ -180,6 +180,17 @@ img, svg { display: block; max-width: 100%; }
   transform: translateY(-1px);
   box-shadow: var(--shadow-lg);
 }
+.cta-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 2px solid var(--accent);
+}
+.cta-secondary:hover {
+  background: var(--accent);
+  color: var(--ink-on-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
 .cta-note {
   color: var(--ink-faint);
   font-size: 14px;
