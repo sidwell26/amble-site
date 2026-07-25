@@ -742,7 +742,6 @@ let trip = newTripObj();
 let candidates = []; // SkeletonCandidate[]
 let activeCandidateIdx = 0;
 let pickingMode = null; // 'start'|'finish'|'stop'
-let stopPickDayIdx = null;
 let placeDebounce = {};
 // Incremented on each "Regenerate" press. Passed as rerollSeed to
 // planSkeletonCandidates so each regeneration rotates strategy slots.
@@ -800,7 +799,7 @@ map.on('click', e => {
   const label = `${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°${lng < 0 ? 'W' : 'E'}`;
   if (pickingMode === 'start') setPlace('start', coord, label);
   else if (pickingMode === 'finish') setPlace('finish', coord, label);
-  else if (pickingMode === 'stop') placeStop(coord, stopPickDayIdx);
+  else if (pickingMode === 'stop') placeStop(coord, readStopDayIdx());
   endPickMode();
 });
 
@@ -856,6 +855,11 @@ let currentStep = 1;
 
 // ── Place search (Nominatim) ──────────────────────────────────────────────────
 let searchTimers = { start: null, finish: null, stop: null };
+// Per-field request sequence tokens. A slow earlier Photon response could
+// otherwise resolve AFTER a newer keystroke's response and paint stale
+// results (type "edin" then "edinburgh" — "edin" must not win). Only the
+// latest-issued query for a field is allowed to render. (Audit fix.)
+let searchSeq = { start: 0, finish: 0, stop: 0 };
 
 async function searchPlaces(query) {
   if (query.length < 2) return [];
@@ -884,8 +888,11 @@ function onPlaceInput(which) {
   document.getElementById(`${which}-clear`).style.display = val ? 'block' : 'none';
   clearTimeout(searchTimers[which]);
   if (val.length < 2) { hideResults(which); return; }
+  const mySeq = ++searchSeq[which];
   searchTimers[which] = setTimeout(async () => {
     const results = await searchPlaces(val);
+    // Drop if a newer query for this field was issued while we waited.
+    if (mySeq !== searchSeq[which]) return;
     showResults(which, results);
   }, 300);
 }
@@ -1778,6 +1785,15 @@ async function generateSkeleton() {
           label: c.label,
         }));
         renderCandidateStrip();
+        // scoreAllCandidates mutated dayEnds in place on EVERY candidate,
+        // including the one currently displayed (trip.skeleton === the
+        // active candidate's skeleton after applyCandidate(0)). Re-render
+        // the map day-end markers + day list so the on-screen cuts match
+        // the snapped dayEnds instead of silently drifting stale.
+        if (trip.skeleton === activeSkeleton) {
+          placeDayEndMarkers();
+          renderDayList();
+        }
       }).catch(() => {}); // graceful failure — labels stay as compass bearings
     }
 
@@ -2065,8 +2081,10 @@ async function onStopInput() {
   document.getElementById('stop-clear').style.display = val ? 'block' : 'none';
   clearTimeout(searchTimers.stop);
   if (val.length < 2) { document.getElementById('stop-results').style.display = 'none'; return; }
+  const mySeq = ++searchSeq.stop;
   searchTimers.stop = setTimeout(async () => {
     const results = await searchPlaces(val);
+    if (mySeq !== searchSeq.stop) return; // superseded by a newer keystroke
     const el = document.getElementById('stop-results');
     if (!results.length) { el.style.display = 'none'; return; }
     el.innerHTML = results.map((r, i) => {
@@ -2091,21 +2109,25 @@ function onStopKey(e) {
   }
 }
 
+// Read the stop-day-input, clamped to a valid 0-based day index. A blank
+// input gives parseInt('') = NaN → NaN - 1 = NaN, which would push a stop
+// with dayIndex:NaN that never matches any day's list (NaN !== anything)
+// yet still persists and syncs to the phone. Default to Day 1, clamp to
+// the last day. Shared by selectStop AND the map-click stop path (which
+// previously passed the never-assigned `stopPickDayIdx`, i.e. null).
+function readStopDayIdx() {
+  const raw = parseInt(document.getElementById('stop-day-input').value, 10);
+  const maxDayIdx = Math.max(0, (trip.days?.length || trip.targetDayCount || 1) - 1);
+  return Number.isFinite(raw) ? Math.min(Math.max(0, raw - 1), maxDayIdx) : 0;
+}
+
 function selectStop(idx) {
   const el = document.getElementById('stop-results');
   const r = el && el._data && el._data[idx];
   if (!r) return; // results cleared between paint and click — nothing to select
   const coord = { latitude: parseFloat(r.lat), longitude: parseFloat(r.lon) };
   const name = r.display_name.split(',').slice(0, 2).join(',').trim();
-  // Clamp the day index to a valid range. A blank input gives
-  // parseInt('') = NaN → NaN - 1 = NaN, which would push a stop with
-  // dayIndex:NaN that never matches any day's list (NaN !== anything) yet
-  // still persists and syncs to the phone. Default to Day 1, clamp to the
-  // last day. maxDays mirrors the input's `max` (n-1, 0-based).
-  const raw = parseInt(document.getElementById('stop-day-input').value, 10);
-  const maxDayIdx = Math.max(0, (trip.days?.length || trip.targetDayCount || 1) - 1);
-  const dayIdx = Number.isFinite(raw) ? Math.min(Math.max(0, raw - 1), maxDayIdx) : 0;
-  placeStop(coord, dayIdx, name);
+  placeStop(coord, readStopDayIdx(), name);
   clearStopInput();
   hideStopSearch();
   endPickMode();
@@ -4172,8 +4194,11 @@ const OVERPASS_POI_TAGS = {
 };
 
 async function fetchDayPois(alts, dayIdx) {
-  // Union bbox across all generated alts for this day
-  const allCoords = Object.values(alts).flatMap(a => a ? a.coordinates : []);
+  // Union bbox across all generated alts for this day. Guard against alts
+  // that carry no coordinates (e.g. a `{_planning:true}` stub during a
+  // custom replan) — `a.coordinates` would be undefined and spread/iterate
+  // would throw.
+  const allCoords = Object.values(alts).flatMap(a => (a && Array.isArray(a.coordinates)) ? a.coordinates : []);
   if (allCoords.length < 2) return;
 
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
@@ -4193,8 +4218,12 @@ async function fetchDayPois(alts, dayIdx) {
   const midLon = (minLon + maxLon) / 2;
   const bbox = `${(midLat - latSpan/2).toFixed(5)},${(midLon - lonSpan/2).toFixed(5)},${(midLat + latSpan/2).toFixed(5)},${(midLon + lonSpan/2).toFixed(5)}`;
 
-  // Fire queries sequentially per kind to avoid hammering Overpass
-  for (const kind of ['water','shop','landmark']) {
+  // Fetch the three POI kinds in PARALLEL — they share the identical bbox
+  // and hit the (now 4-mirror, timed-out) Overpass client, which throttles
+  // internally, so the old strictly-sequential loop just tripled day-picker
+  // POI latency for no benefit. Each kind's UI update runs as its result
+  // lands. (Audit speed fix, 2026-07-25.)
+  const processKind = async (kind) => {
     const tagFilters = OVERPASS_POI_TAGS[kind].map(t => `${t}(${bbox});`).join('\n  ');
     const limit = kind === 'landmark' ? 80 : 40;
     const q = `[out:json][timeout:20];\n(\n  ${tagFilters}\n);\nout center ${limit};`;
@@ -4233,7 +4262,8 @@ async function fetchDayPois(alts, dayIdx) {
       }
       showPoiMarkers(kind);
     }
-  }
+  };
+  await Promise.all(['water','shop','landmark'].map(processKind));
 }
 
 function clearPoiMarkers() {
