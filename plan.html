@@ -675,8 +675,57 @@ const SUPABASE_ANON = 'sb_publishable_KPfqJPj4N5It7cy6y7DAZQ_8uIPQ0q8';
 const BROUTER_URL   = 'https://routing.amble.fit/brouter';
 const BROUTER_PUBLIC_URL = 'https://brouter.de/brouter';
 const MAP_STYLE     = 'https://tiles.openfreemap.org/styles/liberty';
-const OPEN_ELEVATION_URL = 'https://api.open-elevation.com/api/v1/lookup';
+// OpenTopoData (matches the app's elevationService.ts). Replaced
+// api.open-elevation.com, which is frequently slow or down and was a
+// major source of the multi-day planner feeling frozen — a hung
+// elevation call with no timeout blocked the whole flow.
+const OPENTOPO_URL = 'https://api.opentopodata.org/v1/srtm30m';
 const DAY_COLORS    = ['#a3e635','#3b82f6','#f59e0b','#a855f7','#ec4899','#14b8a6','#f87171','#22c55e','#06b6d4','#fb923c','#84cc16','#e11d48','#7c3aed','#0ea5e9'];
+
+// Overpass mirrors, tried in order — mirrors the app's overpassClient.ts.
+// The web planner previously hit a SINGLE hardcoded endpoint with no
+// timeout, so whenever overpass-api.de was slow or 504'd (common), the
+// whole planner hung on that one request until the browser's default
+// ~300s timeout. overpass.osm.ch is deliberately excluded (Swiss-only —
+// answers UK queries fast, successfully, and EMPTY).
+const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+];
+
+// fetch() with a hard timeout via AbortController. Browsers default to a
+// very long fetch timeout (often ~300s), so a hung upstream (Overpass
+// mirror, BRouter, elevation) would otherwise freeze the planner with no
+// feedback. Every network call in the planner should go through this.
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Pick up to `n` evenly-spaced points along a polyline, ALWAYS including
+// the first and last vertex. Replaces the old `filter(i % step === 0)
+// .slice(0, n)` idiom, which for a 101–199-point route kept every point
+// (step=1) then sliced off everything past index n — computing ascent
+// over only the FRONT of the walk and silently understating total climb,
+// and never guaranteeing the final (often steepest) leg was included.
+// `n` must stay ≤100 for OpenTopoData's per-request cap.
+function sampleEvenly(coords, n) {
+  if (!coords || coords.length === 0) return [];
+  if (coords.length <= n) return coords.slice();
+  const out = [];
+  const stride = (coords.length - 1) / (n - 1);
+  for (let i = 0; i < n; i++) {
+    out.push(coords[Math.min(coords.length - 1, Math.round(i * stride))]);
+  }
+  return out;
+}
 
 // How many skeleton candidates to generate (matches native: 4 variants)
 const CANDIDATE_COUNT = 4;
@@ -810,10 +859,23 @@ let searchTimers = { start: null, finish: null, stop: null };
 
 async function searchPlaces(query) {
   if (query.length < 2) return [];
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
+  // Photon (photon.komoot.io) — free, OSM-backed, with typo tolerance
+  // (matches the app's geocodingService.ts). Replaced Nominatim, whose
+  // exact-match search returned zero results on a single misspelled
+  // letter. Normalised back into Nominatim's {display_name, lat, lon}
+  // shape so showResults/selectPlace stay unchanged. UK-biased via
+  // lat/lon centred on Britain; timed out so a slow geocoder can't hang
+  // the search box.
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lang=en&limit=6&lat=54.5&lon=-3.0`;
   try {
-    const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-    return await r.json();
+    const r = await fetchWithTimeout(url, {}, 8000);
+    const data = await r.json();
+    return (data.features || []).map(f => {
+      const p = f.properties || {};
+      const [lon, lat] = f.geometry?.coordinates || [];
+      const parts = [p.name, p.street, p.district, p.city, p.county, p.state].filter(Boolean);
+      return { display_name: parts.join(', '), lat: String(lat), lon: String(lon) };
+    }).filter(r => r.lat && r.lon && r.display_name);
   } catch { return []; }
 }
 
@@ -1058,11 +1120,11 @@ async function routeBRouterFull(waypoints, profile = 'hiking-mountain', weighted
   const queryString = params.toString();
   let r;
   try {
-    r = await fetch(`${BROUTER_URL}?${queryString}`);
+    r = await fetchWithTimeout(`${BROUTER_URL}?${queryString}`, {}, 20000);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
   } catch (vpsErr) {
-    console.warn('[BR] VPS failed, falling back to brouter.de:', vpsErr);
-    r = await fetch(`${BROUTER_PUBLIC_URL}?${queryString}`);
+    console.warn('[BR] VPS failed/timed out, falling back to brouter.de:', vpsErr);
+    r = await fetchWithTimeout(`${BROUTER_PUBLIC_URL}?${queryString}`, {}, 20000);
   }
   if (!r.ok) {
     const text = await r.text().catch(() => '');
@@ -1094,18 +1156,18 @@ async function routeLoop(start, totalMetres, bearingDeg) {
 
 // ── Elevation (Open-Elevation API, best-effort) ───────────────────────────────
 async function fetchElevationStats(coords) {
-  // Subsample to keep the request small — max 100 points for the quick stats
-  const step = Math.max(1, Math.floor(coords.length / 100));
-  const sampled = coords.filter((_, i) => i % step === 0);
+  // Up to 100 evenly-spaced points (OpenTopoData's per-request cap),
+  // always including the last vertex.
+  const sampled = sampleEvenly(coords, 100);
   try {
-    const r = await fetch(OPEN_ELEVATION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locations: sampled.map(c => ({ latitude: c.latitude, longitude: c.longitude })) }),
-    });
+    const locations = sampled.map(c => `${c.latitude},${c.longitude}`).join('|');
+    const r = await fetchWithTimeout(
+      `${OPENTOPO_URL}?locations=${encodeURIComponent(locations)}&interpolation=bilinear`,
+      {}, 12000,
+    );
     if (!r.ok) return null;
     const data = await r.json();
-    const elevs = data.results?.map(p => p.elevation) ?? [];
+    const elevs = (data.results || []).map(p => (typeof p.elevation === 'number' ? p.elevation : 0));
     if (elevs.length < 2) return null;
     let ascent = 0;
     for (let i = 1; i < elevs.length; i++) {
@@ -1768,7 +1830,14 @@ function applyCandidate(idx) {
   renderDayList();
   updateSkeletonStats();
   document.getElementById('stat-ascent').textContent = '…';
+  // Bump the generation token so a slow elevation reply for a PREVIOUS
+  // candidate can't overwrite this one's ascent. Without this, rapidly
+  // switching candidate pills lets candidate A's late response paint A's
+  // ascent while candidate B is displayed. (Same guard generateSkeleton
+  // uses.)
+  const myGeneration = ++skeletonGeneration;
   fetchElevationStats(trip.skeleton.coordinates).then(elev => {
+    if (skeletonGeneration !== myGeneration) return;
     document.getElementById('stat-ascent').textContent = elev ? `${elev.ascentMetres}m` : '?';
   });
 }
@@ -1889,7 +1958,7 @@ function renderDayList() {
       <div class="day-dot" style="background:${color}"></div>
       <div style="flex:1">
         <div class="day-label">Day ${i+1}</div>
-        ${stop ? `<div class="day-stop">🏨 ${stop.name}</div>` : ''}
+        ${stop ? `<div class="day-stop">🏨 ${escapeHtml(stop.name)}</div>` : ''}
       </div>
       <div class="day-km">${km} km</div>
     </div>`;
@@ -2024,10 +2093,18 @@ function onStopKey(e) {
 
 function selectStop(idx) {
   const el = document.getElementById('stop-results');
-  const r = el._data[idx];
+  const r = el && el._data && el._data[idx];
+  if (!r) return; // results cleared between paint and click — nothing to select
   const coord = { latitude: parseFloat(r.lat), longitude: parseFloat(r.lon) };
   const name = r.display_name.split(',').slice(0, 2).join(',').trim();
-  const dayIdx = parseInt(document.getElementById('stop-day-input').value, 10) - 1;
+  // Clamp the day index to a valid range. A blank input gives
+  // parseInt('') = NaN → NaN - 1 = NaN, which would push a stop with
+  // dayIndex:NaN that never matches any day's list (NaN !== anything) yet
+  // still persists and syncs to the phone. Default to Day 1, clamp to the
+  // last day. maxDays mirrors the input's `max` (n-1, 0-based).
+  const raw = parseInt(document.getElementById('stop-day-input').value, 10);
+  const maxDayIdx = Math.max(0, (trip.days?.length || trip.targetDayCount || 1) - 1);
+  const dayIdx = Number.isFinite(raw) ? Math.min(Math.max(0, raw - 1), maxDayIdx) : 0;
   placeStop(coord, dayIdx, name);
   clearStopInput();
   hideStopSearch();
@@ -2048,7 +2125,7 @@ function hideStopSearch() {
 async function placeStop(coord, dayIdx, name) {
   if (!name) {
     try {
-      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`);
+      const r = await fetchWithTimeout(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`, {}, 6000);
       const j = await r.json();
       name = j.name || j.display_name?.split(',')[0] || `Stop (Day ${dayIdx + 1})`;
     } catch { name = `Stop (Day ${dayIdx + 1})`; }
@@ -2071,7 +2148,7 @@ function renderStopList() {
   }
   list.innerHTML = trip.preBookedStops.map(s =>
     `<div class="stop-row">
-      <span class="stop-row-name">🏨 ${s.name}</span>
+      <span class="stop-row-name">🏨 ${escapeHtml(s.name)}</span>
       <span class="stop-row-day">after Day ${s.dayIndex + 1}</span>
       <button class="btn btn-outline btn-sm" style="padding:4px 8px;flex-shrink:0" onclick="removeStop('${s.id}')">✕</button>
     </div>`
@@ -2103,7 +2180,7 @@ function renderSummary() {
     listEl.innerHTML = trip.days.map((d, i) => {
       const km = d.route ? (d.route.distanceMetres/1000).toFixed(1) : '?';
       const color = DAY_COLORS[i % DAY_COLORS.length];
-      const sleep = d.accommodation ? `🏨 ${d.accommodation.name}` : '';
+      const sleep = d.accommodation ? `🏨 ${escapeHtml(d.accommodation.name)}` : '';
       return `<div class="day-row" style="margin-bottom:4px">
         <div class="day-dot" style="background:${color}"></div>
         <div style="flex:1">
@@ -2153,25 +2230,34 @@ async function syncToPhone() {
   const msg = document.getElementById('sync-msg');
   msg.textContent = ''; msg.className = 'sync-msg';
 
-  // Ensure trip is walkable: if per-day picker wasn't completed, build days from
-  // skeleton segments so the phone can walk each day without further planning.
-  if (trip.stage !== 'complete' || !trip.masterRoute || !trip.days.length) {
-    ensureTripComplete();
-  }
+  // try/finally so a throw in ensureTripComplete() or a network error in
+  // the upsert (which rejects rather than resolving {error}) can't leave
+  // the button stuck disabled in its "…" state with no recovery.
+  try {
+    // Ensure trip is walkable: if per-day picker wasn't completed, build days from
+    // skeleton segments so the phone can walk each day without further planning.
+    if (trip.stage !== 'complete' || !trip.masterRoute || !trip.days.length) {
+      ensureTripComplete();
+    }
 
-  trip.updatedAt = new Date().toISOString();
-  const { error } = await sb.from('cloud_trips').upsert(
-    { id: trip.id, user_id: session.user.id, data: trip, updated_at: trip.updatedAt },
-    { onConflict: 'id,user_id' }
-  );
-  setLoading('sync-btn', false);
-  if (error) {
-    msg.textContent = '✕ ' + error.message; msg.className = 'sync-msg err';
+    trip.updatedAt = new Date().toISOString();
+    const { error } = await sb.from('cloud_trips').upsert(
+      { id: trip.id, user_id: session.user.id, data: trip, updated_at: trip.updatedAt },
+      { onConflict: 'id,user_id' }
+    );
+    if (error) {
+      msg.textContent = '✕ ' + error.message; msg.className = 'sync-msg err';
+      toast('Sync failed', 'red');
+    } else {
+      msg.textContent = '✓ Synced! Open Amble on your phone → pull to refresh → ready to walk.';
+      msg.className = 'sync-msg ok';
+      toast('Synced ✓', 'green');
+    }
+  } catch (e) {
+    msg.textContent = '✕ ' + (e && e.message ? e.message : 'Sync failed'); msg.className = 'sync-msg err';
     toast('Sync failed', 'red');
-  } else {
-    msg.textContent = '✓ Synced! Open Amble on your phone → pull to refresh → ready to walk.';
-    msg.className = 'sync-msg ok';
-    toast('Synced ✓', 'green');
+  } finally {
+    setLoading('sync-btn', false);
   }
 }
 
@@ -2496,18 +2582,27 @@ async function downloadTripGpx() {
 }
 
 // ── Overpass helpers ──────────────────────────────────────────────────────────
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
-
 async function overpassQuery(body) {
-  try {
-    const r = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(body),
-    });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch { return null; }
+  // Try each mirror in turn with a per-request timeout. First one that
+  // answers wins; a slow/dead mirror is abandoned after 15s instead of
+  // hanging the whole planner. A 200 with elements is a hit; an empty or
+  // failed response moves on to the next mirror.
+  const encoded = 'data=' + encodeURIComponent(body);
+  for (const url of OVERPASS_MIRRORS) {
+    try {
+      const r = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: encoded,
+      }, 15000);
+      if (!r.ok) { console.warn(`[overpass] ${url} → HTTP ${r.status}, next mirror`); continue; }
+      const data = await r.json();
+      if (data && Array.isArray(data.elements)) return data;
+    } catch (e) {
+      console.warn(`[overpass] ${url} → ${e && e.name === 'AbortError' ? 'timeout' : e}, next mirror`);
+    }
+  }
+  return null;
 }
 
 // ── Greenery scoring (Overpass parks bbox) ────────────────────────────────────
@@ -3168,8 +3263,8 @@ function showSleepConfirm(dayIdx, poiIdx) {
     .setHTML(`
       <div style="font-family:-apple-system,sans-serif;padding:2px">
         <div style="font-size:20px;text-align:center;margin-bottom:4px">${poi.emoji || '🏨'}</div>
-        <div style="font-weight:700;font-size:13px;color:#f5f5f5;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">${poi.name}</div>
-        <div style="font-size:11px;color:#a3a3a3;margin-bottom:8px">${poi.kind || ''} · ${distStr}</div>
+        <div style="font-weight:700;font-size:13px;color:#f5f5f5;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px">${escapeHtml(poi.name)}</div>
+        <div style="font-size:11px;color:#a3a3a3;margin-bottom:8px">${escapeHtml(poi.kind || '')} · ${distStr}</div>
         <div style="display:flex;gap:6px">
           <button onclick="closeSleepConfirm()" style="flex:1;padding:6px 0;background:#1e1e1e;border:1px solid #2a2a2a;border-radius:6px;color:#a3a3a3;font-size:12px;cursor:pointer">✕ Cancel</button>
           <button onclick="confirmSleepPick(${dayIdx},${poiIdx})" style="flex:2;padding:6px 0;background:#a3e635;border:none;border-radius:6px;color:#0a0a0a;font-size:12px;font-weight:700;cursor:pointer">Sleep here</button>
@@ -3230,7 +3325,7 @@ function renderSleepNight(i, coord, parks) {
         .filter(p => p.kind === tag || (tag === 'forest' && (p.kind === 'forest' || p.kind === 'wood')))
         .sort((a, b) => haversine(coord, a.centre) - haversine(coord, b.centre))[0];
       const msg = nearest?.name
-        ? `This night is near ${nearest.name} — natural stop.`
+        ? `This night is near ${escapeHtml(nearest.name)} — natural stop.`
         : `Natural area nearby — good wild camping territory.`;
       greenEl.innerHTML = `<div style="background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.4);border-radius:6px;padding:8px 10px;margin-bottom:8px">
         <div style="font-size:11px;font-weight:700;color:#16a34a;letter-spacing:1px">${d.emoji} ${d.label.toUpperCase()}</div>
@@ -3253,7 +3348,7 @@ function renderSleepNight(i, coord, parks) {
       return `<div class="accom-card${pick && pick.id === p.id ? ' picked' : ''}" onclick="pickSleepByIdx(${i}, ${j})">
         <div class="accom-emoji">${p.emoji}</div>
         <div style="flex:1">
-          <div class="accom-name">${p.name}</div>
+          <div class="accom-name">${escapeHtml(p.name)}</div>
           <div class="accom-dist">${p.distM < 1000 ? p.distM + 'm away' : (p.distM/1000).toFixed(1) + 'km away'}</div>
         </div>
         ${badge}
@@ -4535,16 +4630,15 @@ function toggleSkeletonElevProfile() {
 
 async function loadSkelElevProfile(coords) {
   if (!coords || coords.length < 2) return;
-  const step = Math.max(1, Math.floor(coords.length / 150));
-  const sampled = coords.filter((_, i) => i % step === 0);
-  if (sampled[sampled.length - 1] !== coords[coords.length - 1]) sampled.push(coords[coords.length - 1]);
+  // Up to 100 evenly-spaced points (OpenTopoData cap), last point included.
+  const sampled = sampleEvenly(coords, 100);
   document.getElementById('sep-ascent').textContent = '…';
   try {
-    const r = await fetch(OPEN_ELEVATION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locations: sampled.map(c => ({ latitude: c.latitude, longitude: c.longitude })) }),
-    });
+    const locations = sampled.map(c => `${c.latitude},${c.longitude}`).join('|');
+    const r = await fetchWithTimeout(
+      `${OPENTOPO_URL}?locations=${encodeURIComponent(locations)}&interpolation=bilinear`,
+      {}, 12000,
+    );
     if (!r.ok) throw new Error('unavailable');
     const data = await r.json();
     const results = data.results ?? [];
@@ -4633,19 +4727,16 @@ function toggleElevProfile() {
 
 async function loadElevProfile(coords) {
   if (!coords || coords.length < 2) return;
-  // Use Open-Elevation — same API as skeleton stats
-  const step = Math.max(1, Math.floor(coords.length / 150));
-  const sampled = coords.filter((_, i) => i % step === 0);
-  // Ensure last point is included
-  if (sampled[sampled.length - 1] !== coords[coords.length - 1]) sampled.push(coords[coords.length - 1]);
+  // Up to 100 evenly-spaced points (OpenTopoData cap), last point included.
+  const sampled = sampleEvenly(coords, 100);
 
   document.getElementById('ep-ascent').textContent = '…';
   try {
-    const r = await fetch(OPEN_ELEVATION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locations: sampled.map(c => ({ latitude: c.latitude, longitude: c.longitude })) }),
-    });
+    const locations = sampled.map(c => `${c.latitude},${c.longitude}`).join('|');
+    const r = await fetchWithTimeout(
+      `${OPENTOPO_URL}?locations=${encodeURIComponent(locations)}&interpolation=bilinear`,
+      {}, 12000,
+    );
     if (!r.ok) throw new Error('elevation unavailable');
     const data = await r.json();
     const results = data.results ?? [];
@@ -5271,9 +5362,9 @@ async function routeCustomWaypoints() {
     const waypoints = crWaypoints.map(w => ({ latitude: w.lat, longitude: w.lon }));
     const lonlats = waypoints.map(p => `${p.longitude.toFixed(6)},${p.latitude.toFixed(6)}`).join('|');
     const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`;
-    let res = await fetch(url).catch(() => null);
+    let res = await fetchWithTimeout(url, {}, 20000).catch(() => null);
     if (!res || !res.ok) {
-      res = await fetch(`${BROUTER_PUBLIC_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`).catch(() => null);
+      res = await fetchWithTimeout(`${BROUTER_PUBLIC_URL}?lonlats=${lonlats}&profile=hiking-mountain&alternativeidx=0&format=geojson`, {}, 20000).catch(() => null);
     }
     if (!res || !res.ok) throw new Error('Routing failed');
     const data = await res.json();
