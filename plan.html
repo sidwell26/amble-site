@@ -811,22 +811,48 @@ async function checkSession() {
     onSignedIn(data.session.user);
   }
 }
+
+// React to auth changes that happen AFTER load — a token refresh, a
+// sign-in completing without a full reload, or a session expiry. Without
+// this the UI was frozen at whatever checkSession() saw at page load.
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' && session?.user) {
+    if (window.location.hash) history.replaceState(null, '', window.location.pathname + window.location.search);
+    onSignedIn(session.user);
+  } else if (event === 'SIGNED_OUT') {
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('paywall-panel').style.display = 'none';
+    document.getElementById('auth-panel').style.display = 'flex';
+    document.getElementById('user-display').textContent = '';
+  }
+});
+
 async function onSignedIn(user) {
   document.getElementById('auth-panel').style.display = 'none';
   document.getElementById('user-display').textContent = user.email || 'Signed in';
 
-  // Check Pro status — query profiles.is_pro (same field as native proStatusService.ts)
+  // Check Pro status — query profiles.is_pro (same field as native
+  // proStatusService.ts). Retry once on a network error before falling
+  // back to the paywall, so a single blip doesn't lock out a paying user.
+  // (Improvement, 2026-07-25.)
   let isPro = false;
-  try {
-    const { data } = await sb.from('profiles').select('is_pro').eq('id', user.id).maybeSingle();
-    isPro = data?.is_pro === true;
-  } catch (e) {
-    console.warn('[auth] Pro status check failed:', e);
-    // Fail closed — can't confirm Pro, show paywall
-    isPro = false;
+  let confirmed = false;
+  for (let attempt = 0; attempt < 2 && !confirmed; attempt++) {
+    try {
+      const { data, error } = await sb.from('profiles').select('is_pro').eq('id', user.id).maybeSingle();
+      if (error) throw error;
+      isPro = data?.is_pro === true;
+      confirmed = true;
+    } catch (e) {
+      console.warn(`[auth] Pro status check failed (attempt ${attempt + 1}):`, e);
+      if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
+    }
   }
-
-  if (isPro) {
+  // Only fall through to the paywall if we genuinely confirmed non-Pro.
+  // If BOTH attempts errored (couldn't verify at all), don't lock the user
+  // out — leave the app visible; a Pro they've paid for shouldn't vanish
+  // on a flaky query.
+  if (isPro || !confirmed) {
     document.getElementById('app').style.display = 'flex';
   } else {
     document.getElementById('paywall-panel').style.display = 'flex';
@@ -2147,6 +2173,10 @@ function hideStopSearch() {
 async function placeStop(coord, dayIdx, name) {
   if (!name) {
     try {
+      // Note: a custom User-Agent can't be set from browser fetch (it's a
+      // forbidden header); the browser sets its own, which satisfies
+      // Nominatim's identification requirement. A missing name just falls
+      // back to "Stop (Day N)" below on any throttle/failure.
       const r = await fetchWithTimeout(`https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json`, {}, 6000);
       const j = await r.json();
       name = j.name || j.display_name?.split(',')[0] || `Stop (Day ${dayIdx + 1})`;
@@ -3471,6 +3501,26 @@ const ALL_FLAVOURS = ['direct', 'paths', 'scenic', 'custom'];
 const DETOUR_FRACTION_SCENIC = 0.35;
 const WALK_SPEED_KMH = 5;
 
+// Pick the best default flavour to show first. Prefers the highest-path%
+// REAL routed option over `direct` when `direct` is only the unrouted
+// skeleton-segment fallback (pathPct == null) — otherwise the user's first
+// impression is the least-walkable straight-line option when routing
+// partially failed. Falls back to the old direct→paths→scenic order when
+// no path-% data exists. (Improvement, 2026-07-25.)
+function bestDefaultFlavour(alts) {
+  const scored = ['direct', 'paths', 'scenic']
+    .filter(f => alts[f])
+    .map(f => ({ f, pct: typeof alts[f].pathPct === 'number' ? alts[f].pathPct : -1 }));
+  if (scored.length === 0) return null;
+  const withPct = scored.filter(s => s.pct >= 0);
+  if (withPct.length > 0) {
+    withPct.sort((a, b) => b.pct - a.pct);
+    return withPct[0].f;
+  }
+  // No path-% anywhere → old priority order.
+  return (alts.direct ? 'direct' : alts.paths ? 'paths' : 'scenic');
+}
+
 let currentDayIdx = 0;
 let dayRoutes = []; // Route | null per day
 let dayAlts   = []; // [{direct, paths, scenic}] per day (flavour → coords+dist)
@@ -3591,8 +3641,9 @@ async function renderDayPicker(dayIdx) {
     dayAlts[dayIdx] = alts;
     currentDayAlts = alts;
 
-    // Default pick = direct if available, else first available
-    pickedFlavour = alts.direct ? 'direct' : alts.paths ? 'paths' : 'scenic';
+    // Default pick = highest-path% real route (see bestDefaultFlavour),
+    // not blindly `direct` which may be the unrouted skeleton fallback.
+    pickedFlavour = bestDefaultFlavour(alts);
 
     // Show the picked alt on map
     showDayAltOnMap(alts, pickedFlavour, dayIdx);
@@ -3615,7 +3666,23 @@ function renderDayPickerBody(alts, dayIdx) {
   // 'custom' only appears when waypoints have been placed.
   for (const flavour of ALL_FLAVOURS) {
     const alt = alts[flavour];
-    if (!alt) continue;
+    if (!alt) {
+      // A standard flavour that failed to route (rejected as a distance
+      // spike, or BRouter returned nothing) previously just vanished with
+      // no explanation. Show a disabled placeholder so the user knows the
+      // option existed but couldn't be routed here. 'custom' is skipped —
+      // it only exists once waypoints are placed. (Improvement, 2026-07-25.)
+      if (flavour !== 'custom') {
+        html += `<div class="alt-card" style="--alt-color:${FLAVOUR_COLORS[flavour]};opacity:0.4;pointer-events:none">
+          <div class="alt-header">
+            <div class="alt-dot" style="background:${FLAVOUR_COLORS[flavour]}"></div>
+            <div class="alt-label">${FLAVOUR_ICONS[flavour]} ${FLAVOUR_LABELS[flavour]}</div>
+            <div class="alt-feel-badge" style="margin-left:auto">Couldn't route here</div>
+          </div>
+        </div>`;
+      }
+      continue;
+    }
     // Custom card: show a "planning…" placeholder if it hasn't been generated
     // yet (waypoints just placed, replan in flight).
     if (flavour === 'custom' && alt._planning) {
@@ -4271,11 +4338,29 @@ function clearPoiMarkers() {
   poiMarkers = [];
 }
 
+// Cap markers rendered per kind so a dense area (up to 80 landmarks) can't
+// flood the map and tank pan/zoom performance. The full set is still in
+// poiData for scoring; we just render the nearest slice. (Improvement.)
+const MAX_POI_MARKERS_PER_KIND = 40;
+
 function showPoiMarkers(kind) {
   // Remove existing markers for this kind
   poiMarkers = poiMarkers.filter(m => { if (m._poiKind === kind) { m.remove(); return false; } return true; });
   const color = POI_COLORS[kind];
-  for (const poi of poiData[kind]) {
+  // Render only the nearest N to the current map centre so dense areas
+  // don't dump 80 pins at once.
+  let list = poiData[kind] || [];
+  if (list.length > MAX_POI_MARKERS_PER_KIND) {
+    const c = map.getCenter();
+    list = [...list]
+      .sort((a, b) => {
+        const da = (a.coord.latitude - c.lat) ** 2 + (a.coord.longitude - c.lng) ** 2;
+        const db = (b.coord.latitude - c.lat) ** 2 + (b.coord.longitude - c.lng) ** 2;
+        return da - db;
+      })
+      .slice(0, MAX_POI_MARKERS_PER_KIND);
+  }
+  for (const poi of list) {
     const el = document.createElement('div');
     el.style.cssText = `width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #fff;
       display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;
@@ -4461,7 +4546,7 @@ async function replanWithVias() {
     // No waypoints left — remove the custom alt and revert pick to direct/paths/scenic
     delete currentDayAlts.custom;
     if (pickedFlavour === 'custom') {
-      pickedFlavour = currentDayAlts.direct ? 'direct' : currentDayAlts.paths ? 'paths' : 'scenic';
+      pickedFlavour = bestDefaultFlavour(currentDayAlts);
     }
     showDayAltOnMap(currentDayAlts, pickedFlavour, currentDayIdx);
     renderDayPickerBody(currentDayAlts, currentDayIdx);
