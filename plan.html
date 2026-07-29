@@ -1077,7 +1077,17 @@ function nearestIdx(coords, lat, lng) {
 
 function boundaries(skeleton) {
   const { coordinates, dayEnds } = skeleton;
-  return [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestIdx(coordinates, d.coord.latitude, d.coord.longitude)), coordinates.length - 1];
+  const last = coordinates.length - 1;
+  const raw = [0, ...dayEnds.map(d => d.kind === 'cut' ? d.index : nearestIdx(coordinates, d.coord.latitude, d.coord.longitude)), last];
+  // Monotonic clamp: a pinned sleep spot can resolve to a vertex earlier than
+  // the previous boundary (the re-routed polyline backtracks near an
+  // off-corridor accommodation), which would make a day's slice empty /
+  // zero-km and sync an unwalkable day to the phone. Force each boundary to be
+  // strictly greater than the one before it, capped at the last vertex.
+  for (let i = 1; i < raw.length; i++) {
+    if (raw[i] <= raw[i - 1]) raw[i] = Math.min(raw[i - 1] + 1, last);
+  }
+  return raw;
 }
 
 // Distance from start in metres at bearing deg, for synthesising loop anchors.
@@ -2346,7 +2356,7 @@ function ensureTripComplete() {
     };
     const sleep = sleepPicks[i];
     const accommodation = (sleep && sleep !== 'skip')
-      ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
+      ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'campsite' }
       : null;
     days.push({
       id: crypto.randomUUID(),
@@ -3884,10 +3894,18 @@ out bb;`;
 async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const results = {};
 
-  // Skeleton interior anchor points (5 interior, sampled from 7).
-  const skelWpts = skeletonSegment && skeletonSegment.length >= 3
-    ? sampleSkeletonWaypoints(skeletonSegment, Math.min(7, skeletonSegment.length)).slice(1, -1)
-    : [];
+  // Anchor points for the day. In CUSTOM-waypoint mode the user placed
+  // specific must-pass waypoints — use those verbatim as the anchors so the
+  // route actually threads through them (the whole point of custom mode).
+  // Otherwise fall back to sampling the skeleton polyline (5 interior points).
+  const customWps = (trip.customRoute && Array.isArray(trip.dayWaypoints?.[dayIdx]))
+    ? trip.dayWaypoints[dayIdx]
+    : null;
+  const skelWpts = (customWps && customWps.length > 0)
+    ? customWps
+    : (skeletonSegment && skeletonSegment.length >= 3
+        ? sampleSkeletonWaypoints(skeletonSegment, Math.min(7, skeletonSegment.length)).slice(1, -1)
+        : []);
   const aw = [start, ...skelWpts, end];
   const midIdx = Math.floor(aw.length / 2);
   const directLen = haversine(start, end);
@@ -3982,8 +4000,15 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   // Max route distance: 2.5× the crow-flies distance. Rejects BRouter
   // returning a giant loop because a nudge point landed on the far side of
   // a hill or private land. Mirrors tripDayRouter.ts MAX_DIST_RATIO.
+  // In custom mode the anchors are the user's own waypoints, so the honest
+  // baseline is the sum of leg lengths THROUGH those waypoints, not the
+  // straight start→end line — otherwise a legitimate waypoint-following route
+  // gets rejected as a "spike" just because the waypoints wiggle.
   const MAX_DIST_RATIO = 2.5;
-  const isSpike = (coords) => totalDist(coords) > directLen * MAX_DIST_RATIO;
+  const spikeBaseline = (customWps && customWps.length > 0)
+    ? aw.reduce((sum, w, i) => i === 0 ? 0 : sum + haversine(aw[i - 1], w), 0)
+    : directLen;
+  const isSpike = (coords) => totalDist(coords) > Math.max(directLen, spikeBaseline) * MAX_DIST_RATIO;
 
   // Paths: perpendicular nudge at 10% of direct distance (capped 1.5km),
   // inserted at the quarter-point of the skeleton anchor list.
@@ -3995,9 +4020,14 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const qIdx = Math.max(1, Math.floor(aw.length / 4));
   const pathsWaypoints = [...aw.slice(0, qIdx), pathsNudge, ...aw.slice(qIdx)];
 
+  // In custom-waypoint mode the user placed waypoints ON the paths they want
+  // to walk, so even "Direct" should prefer footways rather than dropping to
+  // the nearest main road between anchors. Use trekking for Direct too here;
+  // the tight custom anchors keep it from wandering off-piste. In normal mode
+  // Direct stays hiking-mountain (balanced distance).
+  const directProfile = trip.customRoute ? 'trekking' : 'hiking-mountain';
   const [rDirect, rPaths, parkVia] = await Promise.all([
-    // Direct: hiking-mountain for balanced distance — trekking can go wildly off-piste
-    routeBRouterFull(aw, 'hiking-mountain', dayAllPolylines).catch(() => null),
+    routeBRouterFull(aw, directProfile, dayAllPolylines).catch(() => null),
     // Paths: trekking + perpendicular nudge to prefer footpaths
     routeBRouterFull(pathsWaypoints, 'trekking', dayAllPolylines, 0).catch(() => null),
     scenicViaPromise,
@@ -4015,8 +4045,9 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const rScenic = await routeBRouterFull(scenicAW, 'hiking-mountain', dayAllPolylines).catch(() => null);
 
   // ── Direct ────────────────────────────────────────────────────────────────
-  // Sanity check: reject routes > 3× the haversine distance (routing gone mad)
-  const maxSaneM = Math.max(directLen * 3, 3000);
+  // Sanity check: reject routes > 3× the baseline (routing gone mad). Baseline
+  // is the through-waypoints length in custom mode (see spikeBaseline).
+  const maxSaneM = Math.max(Math.max(directLen, spikeBaseline) * 3, 3000);
   if (rDirect?.coordinates?.length >= 2 && !isSpike(rDirect.coordinates) && totalDist(rDirect.coordinates) <= maxSaneM) {
     results.direct = makeAlt(rDirect.coordinates, rDirect.pathPct);
   } else if (skeletonSegment?.length >= 2) {
@@ -4618,7 +4649,7 @@ function buildRouteObj(dayIdx, alt) {
   const { start, end } = getDayBounds(dayIdx);
   const sleep = sleepPicks[dayIdx];
   const accommodation = (sleep && sleep !== 'skip')
-    ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
+    ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'campsite' }
     : null;
   return {
     id: crypto.randomUUID(),
@@ -4644,7 +4675,7 @@ function buildTripDay(dayIdx, routeObj) {
   const { start, end } = getDayBounds(dayIdx);
   const sleep = sleepPicks[dayIdx];
   const accommodation = (sleep && sleep !== 'skip')
-    ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'camp_site' }
+    ? { id: sleep.id, name: sleep.name, coord: sleep.coord, kind: 'campsite' }
     : null;
   return {
     id: crypto.randomUUID(),
