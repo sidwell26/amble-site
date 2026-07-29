@@ -4020,16 +4020,16 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
   const qIdx = Math.max(1, Math.floor(aw.length / 4));
   const pathsWaypoints = [...aw.slice(0, qIdx), pathsNudge, ...aw.slice(qIdx)];
 
-  // In custom-waypoint mode the user placed waypoints ON the paths they want
-  // to walk, so even "Direct" should prefer footways rather than dropping to
-  // the nearest main road between anchors. Use trekking for Direct too here;
-  // the tight custom anchors keep it from wandering off-piste. In normal mode
-  // Direct stays hiking-mountain (balanced distance).
-  const directProfile = trip.customRoute ? 'trekking' : 'hiking-mountain';
+  // PROFILE CHOICE (measured 2026-07-28): on real UK terrain BRouter's
+  // `hiking-mountain` uses noticeably MORE footways/paths and FEWER roads than
+  // `trekking` — trekking is tuned for long-distance efficiency and will
+  // happily take A-roads (e.g. it ran the A4118 on Gower where hiking-mountain
+  // took the parallel footpath). So ALL flavours use hiking-mountain here; the
+  // difference between them comes from the nudge/via, not the profile.
   const [rDirect, rPaths, parkVia] = await Promise.all([
-    routeBRouterFull(aw, directProfile, dayAllPolylines).catch(() => null),
-    // Paths: trekking + perpendicular nudge to prefer footpaths
-    routeBRouterFull(pathsWaypoints, 'trekking', dayAllPolylines, 0).catch(() => null),
+    routeBRouterFull(aw, 'hiking-mountain', dayAllPolylines).catch(() => null),
+    // Paths: hiking-mountain + perpendicular nudge to push onto footpaths.
+    routeBRouterFull(pathsWaypoints, 'hiking-mountain', dayAllPolylines, 0).catch(() => null),
     scenicViaPromise,
   ]);
 
@@ -4064,7 +4064,7 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
       const nudge2 = perpendicularMidpoint(start, end, 0.08, -1);
       const qIdx2 = Math.max(1, Math.floor(aw.length / 4));
       const wpts2 = [...aw.slice(0, qIdx2), nudge2, ...aw.slice(qIdx2)];
-      const rNudge = await routeBRouterFull(wpts2, 'trekking', dayAllPolylines, 0).catch(() => null);
+      const rNudge = await routeBRouterFull(wpts2, 'hiking-mountain', dayAllPolylines, 0).catch(() => null);
       if (rNudge?.coordinates?.length >= 2 && !isSpike(rNudge.coordinates) && !isDup(rNudge.coordinates)) {
         results.paths = makeAlt(rNudge.coordinates, rNudge.pathPct);
       }
@@ -4078,7 +4078,7 @@ async function generateDayAlts(start, end, dayIdx, skeletonSegment) {
     // Fallback: other perpendicular side
     const otherVia = perpendicularMidpoint(start, end, DETOUR_FRACTION_SCENIC, -1);
     const awOther = [...aw.slice(0, midIdx), otherVia, ...aw.slice(midIdx)];
-    const rOther = await routeBRouterFull(awOther, 'trekking', dayAllPolylines).catch(() => null);
+    const rOther = await routeBRouterFull(awOther, 'hiking-mountain', dayAllPolylines).catch(() => null);
     if (rOther?.coordinates?.length >= 2 && !isSpike(rOther.coordinates) && !isDup(rOther.coordinates)) {
       results.scenic = makeAlt(rOther.coordinates, rOther.pathPct);
     }
@@ -4598,9 +4598,10 @@ async function replanWithVias() {
     const skeletonSegment = getDaySkeletonSegment(currentDayIdx);
     const skeletonVias = sampleSkeletonWaypoints(skeletonSegment, 7).slice(1, -1); // 5 interior
     const waypoints = [start, ...skeletonVias, ...viaCoords, end];
-    // Use trekking profile for custom routes — wild camping context means the
-    // user wants to stay off-road as much as possible.
-    const r = await routeBRouterFull(waypoints, 'trekking');
+    // hiking-mountain stays off-road better than trekking on real UK terrain
+    // (measured — trekking takes A-roads where hiking-mountain takes the
+    // parallel footpath).
+    const r = await routeBRouterFull(waypoints, 'hiking-mountain');
     if (r.coordinates && r.coordinates.length >= 2) {
       const dist = totalDist(r.coordinates);
       currentDayAlts.custom = {
@@ -5387,7 +5388,7 @@ async function buildSkeletonFromWaypoints() {
         return;
       }
 
-      const { coordinates } = await routeBRouterFull(waypoints, 'trekking');
+      const { coordinates } = await routeBRouterFull(waypoints, 'hiking-mountain');
       if (!coordinates || coordinates.length < 2) throw new Error(`Day ${i+1} routing failed`);
 
       const startIdx = allCoords.length;
