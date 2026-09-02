@@ -360,6 +360,21 @@
       #map { flex: 1; min-height: 45vh; }
     }
   </style>
+<style>
+  .plan-safety {
+    max-width: 760px; margin: 32px auto 48px; padding: 18px 20px;
+    border-top: 1px solid rgba(0,0,0,.12);
+    font-size: 14px; line-height: 1.55; color: #444;
+  }
+  .plan-safety p { margin: 0 0 10px; }
+  .plan-safety-links { font-size: 13px; color: #666; }
+  .plan-safety a { color: #5a7256; }
+  @media (prefers-color-scheme: dark) {
+    .plan-safety { border-top-color: rgba(255,255,255,.15); color: #bbb; }
+    .plan-safety-links { color: #999; }
+    .plan-safety a { color: #9db996; }
+  }
+</style>
 </head>
 <body>
 
@@ -5592,5 +5607,31 @@ ${pts}
 // ── Init ──────────────────────────────────────────────────────────────────────
 checkSession();
 </script>
+
+<!-- Safety notice. Multi-day routes cross remote terrain where a wrong path
+     matters far more than on a 30-minute town loop, so the disclaimer is
+     on-page rather than only in the Terms. -->
+<footer class="plan-safety">
+  <p>
+    <strong>Routes are suggestions, not instructions.</strong>
+    Amble builds these from OpenStreetMap data edited by volunteers. No one
+    inspects a route before you see it. Paths may be closed, flooded, fenced,
+    on private land, or simply not there, and daily distances and ascent are
+    estimates only.
+  </p>
+  <p>
+    Multi-day walking crosses remote ground where mistakes carry more
+    consequence. Carry an OS map and compass, check the weather and daylight,
+    book accommodation before you set out, and tell someone your plan.
+    <strong>Amble is not a navigation or safety device</strong> and must not be
+    relied on as your only means of navigation. You walk at your own risk.
+    In an emergency call your local emergency number (999 in the UK, 112 across the EU, 911 in the US) and ask for Mountain Rescue or its local equivalent.
+  </p>
+  <p class="plan-safety-links">
+    <a href="legal/walking-safely.html">Walking safely</a> ·
+    <a href="legal/terms.html">Terms</a> ·
+    <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>
+  </p>
+</footer>
 </body>
 </html>
