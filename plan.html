@@ -72,6 +72,10 @@
     .paywall-features li::before { content: '✓'; color: var(--accent); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
     .paywall-price { font-size: 13px; color: var(--text3); text-align: center; }
     .paywall-signout { font-size: 12px; color: var(--text3); text-align: center; cursor: pointer; text-decoration: underline; }
+    .trial-chip {
+      font-size: 12px; font-weight: 700; color: var(--accent); white-space: nowrap;
+      border: 1px solid var(--accent); border-radius: 999px; padding: 3px 10px;
+    }
     /* Controls */
     label { font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 4px; }
     input[type=text], input[type=number] {
@@ -415,7 +419,17 @@
       <li>Cloud backup of all your walks, routes &amp; trips</li>
       <li>Offline maps, unlimited history, elevation profiles &amp; more</li>
     </ul>
-    <a class="btn" href="https://amble.fit/pricing.html" target="_blank"
+    <!-- Free trial: a plain 30-day grant on the account (start_pro_trial in
+         walkr/supabase/schema.sql). No card, nothing to cancel. -->
+    <div id="paywall-trial" style="display:none;flex-direction:column;gap:8px">
+      <button class="btn btn-accent" id="btn-trial" onclick="startTrial()">Try Pro free for 30 days</button>
+      <p class="paywall-price">No card and nothing to cancel. Pro switches off by itself after 30 days unless you subscribe in the app.</p>
+    </div>
+    <p id="paywall-trial-used" class="paywall-sub" style="display:none">
+      You've used your free trial. Subscribe in the Amble app to keep planning here.
+    </p>
+    <p id="paywall-err" class="auth-err"></p>
+    <a class="btn btn-outline" href="https://amble.fit/pricing.html" target="_blank"
       style="text-align:center;text-decoration:none">
       Get Amble Pro — £2.99/month
     </a>
@@ -429,6 +443,7 @@
     <a href="/" class="topbar-brand">Amble</a>
     <span class="topbar-title">Multi-day trip planner</span>
     <div class="topbar-auth">
+      <span id="trial-chip" class="trial-chip" style="display:none"></span>
       <span id="user-display" style="font-size:12px;color:var(--text3)"></span>
       <button class="btn btn-outline btn-sm" onclick="signOut()">Sign out</button>
     </div>
@@ -839,38 +854,92 @@ sb.auth.onAuthStateChange((event, session) => {
     document.getElementById('paywall-panel').style.display = 'none';
     document.getElementById('auth-panel').style.display = 'flex';
     document.getElementById('user-display').textContent = '';
+    showTrialChip(null);
   }
 });
+
+// Same rule as the app (proStatusService.isServerProActive) and the RLS in
+// walkr/supabase/schema.sql: Pro only while pro_until is unset or still
+// ahead. An expired trial keeps is_pro = true with a past pro_until.
+function hasActivePro(p) {
+  return !!p && p.is_pro === true && (p.pro_until == null || Date.parse(p.pro_until) > Date.now());
+}
+
+function fmtTrialEnd(iso) {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function showTrialChip(endsAt) {
+  const chip = document.getElementById('trial-chip');
+  if (!endsAt) { chip.style.display = 'none'; return; }
+  const days = Math.max(0, Math.ceil((Date.parse(endsAt) - Date.now()) / 86400000));
+  chip.textContent = `Pro trial · ${days} day${days === 1 ? '' : 's'} left`;
+  chip.title = `Ends ${fmtTrialEnd(endsAt)}. Nothing to cancel: it switches off by itself unless you subscribe in the app.`;
+  chip.style.display = 'inline-block';
+}
 
 async function onSignedIn(user) {
   document.getElementById('auth-panel').style.display = 'none';
   document.getElementById('user-display').textContent = user.email || 'Signed in';
 
-  // Check Pro status — query profiles.is_pro (same field as native
+  // Check Pro status from the profile row (same row as native
   // proStatusService.ts). Retry once on a network error before falling
   // back to the paywall, so a single blip doesn't lock out a paying user.
   // (Improvement, 2026-07-25.)
-  let isPro = false;
+  let profile = null;
   let confirmed = false;
   for (let attempt = 0; attempt < 2 && !confirmed; attempt++) {
     try {
-      const { data, error } = await sb.from('profiles').select('is_pro').eq('id', user.id).maybeSingle();
+      const { data, error } = await sb.from('profiles')
+        .select('is_pro, pro_source, pro_until, trial_started_at')
+        .eq('id', user.id).maybeSingle();
       if (error) throw error;
-      isPro = data?.is_pro === true;
+      profile = data;
       confirmed = true;
     } catch (e) {
       console.warn(`[auth] Pro status check failed (attempt ${attempt + 1}):`, e);
       if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
     }
   }
+  const isPro = hasActivePro(profile);
+  showTrialChip(isPro && profile.pro_source === 'trial' ? profile.pro_until : null);
   // Only fall through to the paywall if we genuinely confirmed non-Pro.
   // If BOTH attempts errored (couldn't verify at all), don't lock the user
   // out — leave the app visible; a Pro they've paid for shouldn't vanish
   // on a flaky query.
   if (isPro || !confirmed) {
+    document.getElementById('paywall-panel').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
   } else {
+    const trialUsed = !!profile?.trial_started_at;
+    document.getElementById('paywall-trial').style.display = trialUsed ? 'none' : 'flex';
+    document.getElementById('paywall-trial-used').style.display = trialUsed ? 'block' : 'none';
+    document.getElementById('paywall-err').textContent = '';
+    document.getElementById('app').style.display = 'none';
     document.getElementById('paywall-panel').style.display = 'flex';
+  }
+}
+
+async function startTrial() {
+  const err = document.getElementById('paywall-err');
+  err.textContent = '';
+  setLoading('btn-trial', true);
+  const { data, error } = await sb.rpc('start_pro_trial');
+  setLoading('btn-trial', false);
+  if (error || !data?.status) {
+    err.textContent = "Couldn't start your trial. Check your connection and try again.";
+    return;
+  }
+  if (data.status === 'not_signed_in') {
+    err.textContent = 'Your session has expired. Sign out and back in, then try again.';
+    return;
+  }
+  // started / already_pro / trial_used: re-read the profile so the page
+  // shows exactly what the server now says.
+  const { data: s } = await sb.auth.getSession();
+  if (s.session) await onSignedIn(s.session.user);
+  if (data.status === 'started') {
+    toast(`Pro trial started. Ends ${fmtTrialEnd(data.pro_until)}. Nothing to cancel.`);
   }
 }
 async function signInWith(provider) {
@@ -884,11 +953,19 @@ async function signInWith(provider) {
   if (error) { document.getElementById('auth-err').textContent = error.message; setLoading(btnId, false); }
 }
 async function signOut() {
-  await sb.auth.signOut();
+  const { error } = await sb.auth.signOut();
+  if (error) {
+    // Offline: Supabase leaves the session in this browser, so a refresh
+    // would sign back in — bad on a shared computer. Remove it here.
+    try {
+      Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k));
+    } catch (_) { /* storage unavailable */ }
+  }
   document.getElementById('app').style.display = 'none';
   document.getElementById('paywall-panel').style.display = 'none';
   document.getElementById('auth-panel').style.display = 'flex';
   document.getElementById('user-display').textContent = '';
+  showTrialChip(null);
 }
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
@@ -3678,7 +3755,7 @@ async function renderDayPicker(dayIdx) {
 
     renderDayPickerBody(alts, dayIdx);
   } catch(e) {
-    body.innerHTML = `<p style="color:var(--red);font-size:13px">⚠ ${e.message || 'Route generation failed'}</p>
+    body.innerHTML = `<p style="color:var(--red);font-size:13px">⚠ ${escapeHtml(e.message || 'Route generation failed')}</p>
       <button class="btn btn-outline btn-sm" onclick="renderDayPicker(${dayIdx})" style="margin-top:8px;width:100%">Retry</button>`;
   }
 }
@@ -3816,7 +3893,7 @@ function renderDayPickerBody(alts, dayIdx) {
       html += `<div style="display:flex;align-items:center;justify-content:space-between;
           padding:4px 6px;margin-bottom:3px;background:rgba(255,255,255,0.05);
           border-radius:6px;font-size:11px;color:var(--text)">
-        <span>${icon} ${label}</span>
+        <span>${icon} ${escapeHtml(label)}</span>
         <button onclick="removeCustomWaypointByIdx(${i})"
           style="background:none;border:none;color:var(--text3);font-size:13px;
             cursor:pointer;padding:0 4px;line-height:1" title="Remove">✕</button>

@@ -50,7 +50,7 @@
     </header>
 
     <h1>Privacy Policy</h1>
-    <p class="meta">Last updated: 16 October 2026</p>
+    <p class="meta">Last updated: 24 October 2026</p>
 
     <p>This policy describes what Amble does with your data. It's written in plain language because that's how privacy policies should be written. If anything here is unclear, email <a href="mailto:privacy@amble.fit">privacy@amble.fit</a> and we'll fix it.</p>
 
@@ -105,9 +105,9 @@
           <td>To show you the current weather glance</td>
         </tr>
         <tr>
-          <td><strong>BRouter / OpenRouteService / GraphHopper</strong></td>
+          <td><strong>Amble's routing server, then BRouter / OpenRouteService / GraphHopper</strong></td>
           <td>Route start and end coordinates</td>
-          <td>When the offline planner can't compute a route and we fall back to a hosted routing service</td>
+          <td>When the offline planner can't compute a route. Our own server is tried first; the public services only if it's unavailable</td>
         </tr>
       </tbody>
     </table>
@@ -117,13 +117,14 @@
     <p>Sign-in is optional. When you sign in, Amble will:</p>
     <ul>
       <li>Create an account using your Apple ID or Google account (we receive: a user ID, optionally your name and email if you choose to share them)</li>
-      <li>Back up your saved walks, dog profiles, preferences, and personal POIs to a database we run on Supabase, so you can restore them on a new phone</li>
-      <li>Optionally back up walk photos to our private cloud storage (photos are not publicly accessible)</li>
+      <li>Keep your Amble Pro status with your account: whether you have Pro, whether it came from the free trial, the App Store or Google Play, when it ends, and whether you've used your free trial</li>
+      <li>If you have Amble Pro (including the free trial): back up your saved walks, dog profiles, trips, preferences and personal POIs to a database we run on Supabase, so you can restore them on a new phone, and back up walk photos to our private cloud storage (photos are not publicly accessible). Signing in without Pro backs nothing up</li>
       <li>Register a push notification token for your device (so we can send walk reminder notifications you've opted into). This token is tied to your account and deleted when you sign out.</li>
       <li>Store a stable device identifier alongside your push token to handle token rotation on reinstall. This identifier is not used for tracking or advertising.</li>
     </ul>
     <p>The cloud copy is encrypted in transit (HTTPS) and at rest (Supabase encrypts its disks).</p>
-    <p><strong>How long we keep it:</strong> your cloud copy is kept for as long as you have an account, so you can restore it on a new phone. Your push token is removed when you sign out. You can delete your account at any time from the Profile tab, or by emailing us; that wipes everything we hold within 30 days. See <a href="delete-account.html">Delete your account</a> for the steps and exactly what is removed.</p>
+    <p><strong>Share links (Amble Pro):</strong> if you create a link to share a route, that route is stored on our server so the link works. Anyone you give the link to can open it, and it shows the whole route, including where it starts, which may be near your home. Links can't be listed or searched; they only open for someone who has one. They are removed when you delete your account, or sooner if you email us.</p>
+    <p><strong>How long we keep it:</strong> your cloud copy is kept for as long as you have an account, so you can restore it on a new phone. Your push token is removed when you sign out. Purchase records are held by Apple, Google and RevenueCat under their own policies. You can delete your account at any time from the Profile tab, or by emailing us; that wipes everything we hold within 30 days. See <a href="delete-account.html">Delete your account</a> for the steps and exactly what is removed.</p>
 
     <h3>Apple Health and Google Health Connect</h3>
     <p>If you grant permission, Amble can:</p>
@@ -134,7 +135,7 @@
     <p>This data flows directly between Amble and the iOS Health / Android Health Connect system. It is not transmitted to our servers. You can revoke this permission at any time in your device settings.</p>
 
     <h3>Web planner (amble.fit/plan)</h3>
-    <p>If you use the web trip planner, it stores your sign-in session in your browser's local storage so you stay logged in. No cookies are used. Route planning queries are sent to BRouter (an open-source routing service) over HTTPS; these contain route coordinates but no account information.</p>
+    <p>If you use the web trip planner, it stores your sign-in session in your browser's local storage so you stay logged in. No cookies are used. Route planning queries are sent over HTTPS to Amble's own routing server (open-source BRouter software), or to the public brouter.de service if ours is unavailable. They contain route coordinates but no account information.</p>
 
     <h2>Permissions Amble asks for</h2>
     <table>
@@ -165,7 +166,7 @@
     </ul>
     <h3>If you are in the UK or EEA</h3>
     <p>Amble is operated from the United Kingdom. We are the data controller for the limited personal data described in this policy, and you can reach us at <a href="mailto:privacy@amble.fit">privacy@amble.fit</a>.</p>
-    <p>Under the UK GDPR and EU GDPR you have the right to access, correct, delete and port your data, to object to or restrict processing, and to withdraw consent at any time. Our lawful bases are: <strong>consent</strong> for location access, health data and notifications (withdraw it any time in your device settings), and <strong>legitimate interests</strong> for running and securing the app. We respond to requests within one month.</p>
+    <p>Under the UK GDPR and EU GDPR you have the right to access, correct, delete and port your data, to object to or restrict processing, and to withdraw consent at any time. Our lawful bases are: <strong>contract</strong> for your account, Amble Pro and its cloud backup (we need the data to provide what you've asked for), <strong>consent</strong> for location access, health data and notifications (withdraw it any time in your device settings), and <strong>legitimate interests</strong> for running and securing the app. We respond to requests within one month.</p>
     <p>If you think we have handled your data badly, you can complain to the UK Information Commissioner's Office (<a href="https://ico.org.uk/">ico.org.uk</a>) or to your local EEA supervisory authority.</p>
 
     <h3>If you are in California</h3>
@@ -180,23 +181,26 @@
       <li><a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy">OpenStreetMap</a> — map data</li>
       <li><a href="https://overpass-api.de">Overpass API</a> — OSM querying</li>
       <li><a href="https://openfreemap.org">OpenFreeMap</a> — map tiles</li>
+      <li><a href="https://opentopomap.org/about">OpenTopoMap</a> — map tiles for the topographic map and offline maps. Receives the map area being loaded, which shows roughly where you're looking.</li>
+      <li><a href="https://expo.dev/privacy">Expo</a> — delivers push notifications, if you've allowed them. Receives your device's push token and the notification text, then hands it to Apple or Google to deliver.</li>
       <li><a href="https://maplibre.org">MapLibre</a> — rendering library (no network calls of its own)</li>
       <li><a href="https://open-meteo.com/en/terms">open-meteo.com</a> — weather</li>
       <li><a href="https://www.opentopodata.org/">OpenTopoData</a> — elevation</li>
-      <li><a href="https://brouter.de">BRouter</a> — routing fallback</li>
+      <li>Amble's routing server (routing.amble.fit), run by us on a server rented from <a href="https://www.hetzner.com/legal/privacy-policy/">Hetzner Online GmbH</a> in Germany — route planning. Receives route coordinates and, like any web server, your IP address; no account information.</li>
+      <li><a href="https://brouter.de">BRouter</a> — routing fallback if our server is unavailable</li>
       <li><a href="https://openrouteservice.org/services/">OpenRouteService</a> — routing fallback</li>
       <li><a href="https://www.graphhopper.com/privacy/">GraphHopper</a> — routing fallback</li>
       <li><a href="https://supabase.com/privacy">Supabase</a> — cloud backup (only when signed in)</li>
       <li><a href="https://www.apple.com/legal/privacy/data/en/health-app/">Apple HealthKit</a> — when you grant permission</li>
       <li><a href="https://www.komoot.com/privacy">Photon (Komoot)</a> — address search. Receives the text you type and, for nearby results, an approximate location.</li>
       <li><a href="https://github.com/Project-OSRM/osrm-backend">OSRM demo server</a> — estimated drive times to walk destinations. Receives the coordinates being compared. See the note below on “Between us”.</li>
-      <li><a href="https://www.revenuecat.com/privacy">RevenueCat</a> — subscription and purchase status, if you ever buy Amble Pro.</li>
+      <li><a href="https://www.revenuecat.com/privacy">RevenueCat</a> — subscription and purchase status, if you ever buy Amble Pro. If you're signed in when you buy or restore a purchase, RevenueCat also receives your Amble account ID, and our server checks your purchase status with it, so Pro works on the web planner and your other devices.</li>
       <li><a href="https://policies.google.com/privacy">Google Health Connect</a> — Android only, when you grant permission.</li>
     </ul>
 
     <h3>Where these services are located</h3>
     <p>Amble is operated from the United Kingdom. Several of the services above are run by volunteers, non-profits or companies based elsewhere, including in the European Economic Area and the United States. When your device contacts them, the request, which may include coordinates, leaves your country.</p>
-    <p>These are direct connections from your device to that service. We do not route them through our own servers, and no account identifier, device identifier or phone number is sent with them. Our own cloud backup (Supabase) is separate and described above.</p>
+    <p>These are direct connections from your device to that service. We do not route them through our own servers, and no account identifier, device identifier or phone number is sent with them. The one exception is RevenueCat, for signed-in Amble Pro buyers, as described above. Our own cloud backup (Supabase) is separate and described above.</p>
     <p>Where personal data is transferred out of the UK or EEA, we rely on the UK and European Commission adequacy decisions where they apply, and otherwise on the International Data Transfer Agreement or Standard Contractual Clauses. For detail on a specific service, email <a href="mailto:privacy@amble.fit">privacy@amble.fit</a>.</p>
 
     <h3>“Between us” — a note about other people’s locations</h3>
